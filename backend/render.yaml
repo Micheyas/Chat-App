@@ -11,7 +11,7 @@ services:
       - key: DATABASE_URL
         value: postgresql://neondb_owner:npg_DjcUPrMWh3o8@ep-wispy-hall-auh7xire-pooler.c-10.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
       - key: ALLOWED_ORIGINS
-        value: https://chat-app-frontend.onrender.com,https://your-frontend-url.vercel.app
+        value: "*"
       - key: CLOUDINARY_CLOUD_NAME
         value: hjahczot
       - key: CLOUDINARY_UPLOAD_PRESET
