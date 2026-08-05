@@ -13,12 +13,14 @@ const app = express();
 // ─── CORS ────────────────────────────────────────────────────────────────────
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : ['http://localhost:5173'];
+  : [];   // empty = allow all (safe fallback when env var isn't set yet)
 
 app.use(cors({
   origin: (origin, cb) => {
-    // Allow requests with no origin (mobile apps, curl, etc.)
+    // Allow requests with no origin (mobile apps, curl, Render health checks)
     if (!origin) return cb(null, true);
+    // If no allowlist configured, permit every origin
+    if (allowedOrigins.length === 0) return cb(null, true);
     if (allowedOrigins.includes(origin)) return cb(null, true);
     cb(new Error(`CORS: origin ${origin} not allowed`));
   },
@@ -217,8 +219,9 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
-    methods: ['GET', 'POST']
+    origin: allowedOrigins.length > 0 ? allowedOrigins : '*',
+    methods: ['GET', 'POST'],
+    credentials: true
   }
 });
 
