@@ -11,21 +11,26 @@ require('dotenv').config();
 const app = express();
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
+// Allow all origins — this is a public chat app.
+// To restrict to specific origins, set ALLOWED_ORIGINS as a comma-separated list.
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : [];   // empty = allow all (safe fallback when env var isn't set yet)
+  : [];
 
 app.use(cors({
   origin: (origin, cb) => {
-    // Allow requests with no origin (mobile apps, curl, Render health checks)
-    if (!origin) return cb(null, true);
-    // If no allowlist configured, permit every origin
-    if (allowedOrigins.length === 0) return cb(null, true);
+    // Always allow: no-origin requests (mobile/curl), or if no allowlist set
+    if (!origin || allowedOrigins.length === 0) return cb(null, true);
     if (allowedOrigins.includes(origin)) return cb(null, true);
     cb(new Error(`CORS: origin ${origin} not allowed`));
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+// Explicitly handle preflight for all routes
+app.options('*', cors());
 
 app.use(express.json());
 
