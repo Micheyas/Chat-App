@@ -1,127 +1,210 @@
-import { useState, useEffect, useRef } from 'react';
-import io from 'socket.io-client';
+import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import socket, { BACKEND_URL } from './socket';
+import JoinScreen from './components/JoinScreen';
+import RoomSidebar from './components/RoomSidebar';
+import MessageList from './components/MessageList';
+import MessageInput from './components/MessageInput';
 import './App.css';
 
-const socket = io.connect(import.meta.env.VITE_BACKEND_URL || 
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-    ? 'http://localhost:5000' 
-    : `http://${window.location.hostname}:5000`));
+// ─── Session helpers ──────────────────────────────────────────────────────────
+const SESSION_KEY = 'chat_session';
 
-const API_URL = import.meta.env.VITE_BACKEND_URL || 
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-    ? 'http://localhost:5000' 
-    : `http://${window.location.hostname}:5000`);
+function saveSession(data) {
+  localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+}
 
-function App() {
-  const [username, setUsername] = useState('');
-  const [isJoined, setIsJoined] = useState(false);
-  const [currentChat, setCurrentChat] = useState(null);
-  const [message, setMessage] = useState('');
+function loadSession() {
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function clearSession() {
+  localStorage.removeItem(SESSION_KEY);
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+export default function App() {
+  // Auth
+  const [auth, setAuth] = useState(null); // { token, username, userId }
+
+  // Rooms
+  const [rooms, setRooms] = useState([]);
+  const [activeRoom, setActiveRoom] = useState(null);
+
+  // Messages
   const [messages, setMessages] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [showChatList, setShowChatList] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const [loading, setLoading] = useState(false);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
+
+  // File upload
   const [uploading, setUploading] = useState(false);
-  const messagesEndRef = useRef(null);
-  const messagesContainerRef = useRef(null);
-  const fileInputRef = useRef(null);
 
+  // Online users
+  const [users, setUsers] = useState([]);
+
+  // Typing
+  const [typingUsers, setTypingUsers] = useState([]);
+
+  // Mobile sidebar visibility
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // ── Restore session on mount ──────────────────────────────────────────────
   useEffect(() => {
-    socket.on('receive_message', (data) => {
-      setMessages(prev => [...prev, data]);
-    });
+    const session = loadSession();
+    if (session?.token && session?.username) {
+      setAuth(session);
+    }
+  }, []);
 
-    socket.on('user-joined', (joinedUsername) => {
-      setUsers(prev => {
-        if (!prev.includes(joinedUsername)) {
-          return [...prev, joinedUsername];
-        }
-        return prev;
-      });
-    });
+  // ── Connect socket when auth is ready ─────────────────────────────────────
+  useEffect(() => {
+    if (!auth) return;
 
-    socket.on('user-left', (leftUsername) => {
-      setUsers(prev => prev.filter(u => u !== leftUsername));
-    });
+    if (!socket.connected) socket.connect();
 
-    socket.on('users-list', (usersList) => {
-      setUsers(usersList);
-    });
+    socket.emit('join', { token: auth.token, username: auth.username });
 
     return () => {
-      socket.off('receive_message');
-      socket.off('user-joined');
-      socket.off('user-left');
-      socket.off('users-list');
+      // Don't disconnect on re-render, only on logout
+    };
+  }, [auth]);
+
+  // ── Socket event listeners ────────────────────────────────────────────────
+  useEffect(() => {
+    const onReceive = (msg) => setMessages(prev => [...prev, msg]);
+    const onDeleted = (id) => setMessages(prev => prev.filter(m => m.id !== id));
+    const onUserJoined = (u) => setUsers(prev => prev.includes(u) ? prev : [...prev, u]);
+    const onUserLeft = (u) => setUsers(prev => prev.filter(x => x !== u));
+    const onUsersList = (list) => setUsers(list);
+    const onTyping = ({ username: u, isTyping }) => {
+      setTypingUsers(prev =>
+        isTyping ? (prev.includes(u) ? prev : [...prev, u]) : prev.filter(x => x !== u)
+      );
+    };
+
+    socket.on('receive_message', onReceive);
+    socket.on('message_deleted', onDeleted);
+    socket.on('user-joined', onUserJoined);
+    socket.on('user-left', onUserLeft);
+    socket.on('users-list', onUsersList);
+    socket.on('user-typing', onTyping);
+
+    return () => {
+      socket.off('receive_message', onReceive);
+      socket.off('message_deleted', onDeleted);
+      socket.off('user-joined', onUserJoined);
+      socket.off('user-left', onUserLeft);
+      socket.off('users-list', onUsersList);
+      socket.off('user-typing', onTyping);
     };
   }, []);
 
+  // ── Fetch rooms once authenticated ───────────────────────────────────────
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    if (!auth) return;
+    axios
+      .get(`${BACKEND_URL}/api/rooms`, {
+        headers: { Authorization: `Bearer ${auth.token}` },
+      })
+      .then(({ data }) => {
+        setRooms(data);
+        if (data.length > 0) setActiveRoom(data[0]);
+      })
+      .catch(console.error);
+  }, [auth]);
 
-  // Load initial messages when joining a chat
-  const loadMessages = async (beforeId = null) => {
-    if (loading) return;
-    
-    setLoading(true);
-    try {
-      const params = { room_id: 'general', limit: 30 };
-      if (beforeId) params.before_id = beforeId;
-      
-      const response = await axios.get(`${API_URL}/api/messages`, { params });
-      const newMessages = response.data;
-      
-      if (newMessages.length < 30) {
-        setHasMore(false);
+  // ── Load messages when room changes ──────────────────────────────────────
+  const loadMessages = useCallback(
+    async (beforeId = null) => {
+      if (!auth || !activeRoom || loadingMsgs) return;
+
+      setLoadingMsgs(true);
+      try {
+        const params = { room_id: String(activeRoom.id), limit: 30 };
+        if (beforeId) params.before_id = beforeId;
+
+        const { data } = await axios.get(`${BACKEND_URL}/api/messages`, {
+          params,
+          headers: { Authorization: `Bearer ${auth.token}` },
+        });
+
+        if (data.length < 30) setHasMore(false);
+        else setHasMore(true);
+
+        if (beforeId) {
+          setMessages(prev => [...data, ...prev]);
+        } else {
+          setMessages(data);
+        }
+      } catch (err) {
+        console.error('Failed to load messages:', err);
+      } finally {
+        setLoadingMsgs(false);
       }
-      
-      if (beforeId) {
-        // Prepend older messages
-        setMessages(prev => [...newMessages, ...prev]);
-      } else {
-        // Initial load
-        setMessages(newMessages);
-      }
-    } catch (error) {
-      console.error('Failed to load messages:', error);
-    } finally {
-      setLoading(false);
-    }
+    },
+    [auth, activeRoom, loadingMsgs]
+  );
+
+  useEffect(() => {
+    if (!activeRoom) return;
+    setMessages([]);
+    setHasMore(true);
+    // Tell the server we're joining this specific room
+    socket.emit('join-room', String(activeRoom.id));
+    loadMessages();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoom]);
+
+  // ── Auth handlers ─────────────────────────────────────────────────────────
+  const handleAuth = (data) => {
+    saveSession(data);
+    setAuth(data);
   };
 
-  // Handle scroll for pagination
-  const handleScroll = () => {
-    if (!messagesContainerRef.current || loading || !hasMore) return;
-    
-    const { scrollTop } = messagesContainerRef.current;
-    if (scrollTop === 0 && messages.length > 0) {
-      const oldestMessage = messages[0];
-      loadMessages(oldestMessage.id);
-    }
+  const handleLogout = () => {
+    clearSession();
+    setAuth(null);
+    setRooms([]);
+    setActiveRoom(null);
+    setMessages([]);
+    setUsers([]);
+    setTypingUsers([]);
+    socket.disconnect();
   };
 
-  const joinChat = () => {
-    if (username.trim()) {
-      socket.emit('join', username);
-      setIsJoined(true);
-      loadMessages(); // Load initial messages
-    }
+  // ── Room handlers ─────────────────────────────────────────────────────────
+  const handleRoomSelect = (room) => {
+    if (activeRoom?.id === room.id) return;
+    setActiveRoom(room);
+    setSidebarOpen(false);
   };
 
-  const sendMessage = () => {
-    if (message.trim()) {
-      socket.emit('send_message', {
-        room_id: 'general',
-        content: message,
-        message_type: 'text'
-      });
-      setMessage('');
-    }
+  const handleRoomCreated = (room) => {
+    setRooms(prev => [...prev, room]);
+    setActiveRoom(room);
   };
 
+  // ── Message handlers ──────────────────────────────────────────────────────
+  const handleSend = (text) => {
+    socket.emit('send_message', {
+      room_id: String(activeRoom.id),
+      content: text,
+      message_type: 'text',
+    });
+  };
+
+  const handleDeleteMessage = (messageId) => {
+    socket.emit('delete_message', {
+      messageId,
+      room_id: String(activeRoom.id),
+    });
+  };
+
+  // ── File upload ───────────────────────────────────────────────────────────
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -132,179 +215,101 @@ function App() {
       formData.append('file', file);
       formData.append('upload_preset', import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET);
 
-      const response = await fetch(
+      const res = await fetch(
         `https://api.cloudinary.com/v1_1/${import.meta.env.VITE_CLOUDINARY_CLOUD_NAME}/auto/upload`,
-        {
-          method: 'POST',
-          body: formData
-        }
+        { method: 'POST', body: formData }
       );
-
-      const data = await response.json();
+      const data = await res.json();
 
       socket.emit('send_message', {
-        room_id: 'general',
+        room_id: String(activeRoom.id),
         content: data.secure_url,
-        message_type: file.type.startsWith('image/') ? 'image' : 'document'
+        message_type: file.type.startsWith('image/') ? 'image' : 'document',
       });
-    } catch (error) {
-      console.error('Upload failed:', error);
+    } catch (err) {
+      console.error('Upload failed:', err);
     } finally {
       setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      e.target.value = '';
     }
   };
 
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter') {
-      sendMessage();
-    }
-  };
-
-  const goBack = () => {
-    setShowChatList(true);
-  };
-
-  const formatTime = (timestamp) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  if (!isJoined) {
-    return (
-      <div className="join-container">
-        <div className="join-box">
-          <div className="telegram-logo">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M21.928 2.628a1.143 1.143 0 0 0-1.516-1.508L2.428 9.378a1.143 1.143 0 0 0 .04 2.12l4.778 1.556 1.78 5.718a.571.571 0 0 0 .983.258l2.5-2.5 4.875 3.714a1.143 1.143 0 0 0 1.784-.666l2.57-15.65z" fill="#0088cc"/>
-            </svg>
-          </div>
-          <h1>Telegram Clone</h1>
-          <input
-            type="text"
-            placeholder="Enter your username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && joinChat()}
-            className="username-input"
-          />
-          <button onClick={joinChat} className="join-button">
-            Start Messaging
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // ── Render ────────────────────────────────────────────────────────────────
+  if (!auth) return <JoinScreen onAuth={handleAuth} />;
 
   return (
     <div className="chat-app">
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      {/* Left sidebar */}
+      <div className={`sidebar-wrapper ${sidebarOpen ? 'sidebar-wrapper--open' : ''}`}>
+        <RoomSidebar
+          rooms={rooms}
+          activeRoom={activeRoom}
+          onRoomSelect={handleRoomSelect}
+          users={users}
+          username={auth.username}
+          token={auth.token}
+          onRoomCreated={handleRoomCreated}
+          onLogout={handleLogout}
+        />
+      </div>
+
+      {/* Right: chat view */}
       <div className="chat-view-container">
+        {/* Header */}
         <div className="chat-view-header">
-          <div className="chat-view-info">
-            <h3>General Chat</h3>
-            <span className="chat-view-status">{users.length} online</span>
-          </div>
-          <button className="users-toggle" onClick={() => setShowChatList(!showChatList)}>
-            👥 Users
-          </button>
-        </div>
-        
-        {showChatList && (
-          <div className="users-panel">
-            <h4>Online Users</h4>
-            <div className="users-list">
-              {users.map((user, index) => (
-                <div key={index} className="user-item">
-                  <div className="user-avatar-small">{user.charAt(0).toUpperCase()}</div>
-                  <span className="user-name-small">{user}</span>
-                  <span className="user-status-online">●</span>
-                </div>
-              ))}
-              {users.length === 0 && <p className="no-users">No users online yet</p>}
-            </div>
-          </div>
-        )}
-        
-        <div 
-          className="messages-container"
-          ref={messagesContainerRef}
-          onScroll={handleScroll}
-        >
-          {loading && <div className="loading-more">Loading older messages...</div>}
-          {messages.map((msg, index) => (
-            <div key={index} className={`message ${msg.username === username ? 'own-message' : 'other-message'}`}>
-              <div className="message-bubble">
-                {msg.username !== username && (
-                  <span className="message-sender">{msg.username}</span>
-                )}
-                {msg.message_type === 'image' ? (
-                  <img src={msg.content} alt="Shared image" className="message-image" />
-                ) : msg.message_type === 'document' ? (
-                  <a href={msg.content} target="_blank" rel="noopener noreferrer" className="message-document">
-                    📎 {msg.content.split('/').pop()}
-                  </a>
-                ) : (
-                  <span className="message-text">{msg.content}</span>
-                )}
-                <div className="message-meta">
-                  <span className="message-time">{formatTime(msg.created_at)}</span>
-                  {msg.username === username && (
-                    <span className="message-status">
-                      <svg viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"/>
-                      </svg>
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-          <div ref={messagesEndRef} />
-        </div>
-        
-        <div className="input-container">
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileUpload}
-            className="file-input"
-            accept="image/*,.pdf,.doc,.docx"
-            style={{ display: 'none' }}
-          />
-          <button 
-            className="attach-button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
+          {/* Mobile hamburger */}
+          <button
+            className="hamburger-btn"
+            onClick={() => setSidebarOpen(v => !v)}
+            aria-label="Open rooms"
           >
-            {uploading ? '⏳' : (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-              </svg>
-            )}
-          </button>
-          <input
-            type="text"
-            placeholder="Message..."
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
-            className="message-input"
-          />
-          <button 
-            onClick={sendMessage} 
-            className="send-button"
-            disabled={!message.trim()}
-          >
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="3" y1="6" x2="21" y2="6"/>
+              <line x1="3" y1="12" x2="21" y2="12"/>
+              <line x1="3" y1="18" x2="21" y2="18"/>
             </svg>
           </button>
+
+          <div className="chat-view-avatar">
+            {activeRoom ? activeRoom.name.charAt(0).toUpperCase() : '#'}
+          </div>
+
+          <div className="chat-view-info">
+            <h3>{activeRoom ? `# ${activeRoom.name}` : 'Select a room'}</h3>
+            <span className="chat-view-status">{users.length} online</span>
+          </div>
         </div>
+
+        {/* Messages */}
+        {activeRoom ? (
+          <>
+            <MessageList
+              messages={messages}
+              username={auth.username}
+              loading={loadingMsgs}
+              hasMore={hasMore}
+              onLoadMore={(id) => loadMessages(id)}
+              onDeleteMessage={handleDeleteMessage}
+              typingUsers={typingUsers}
+            />
+            <MessageInput
+              onSend={handleSend}
+              onFileUpload={handleFileUpload}
+              uploading={uploading}
+              roomId={String(activeRoom.id)}
+            />
+          </>
+        ) : (
+          <div className="no-room-selected">
+            <p>Select or create a room to start chatting</p>
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
-export default App;

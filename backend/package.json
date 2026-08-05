@@ -12,10 +12,12 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
+    "dotenv": "^16.4.7",
     "express": "^5.2.1",
-    "socket.io": "^4.8.3",
+    "jsonwebtoken": "^9.0.3",
     "pg": "^8.13.1",
-    "dotenv": "^16.4.7"
+    "socket.io": "^4.8.3"
   }
 }
