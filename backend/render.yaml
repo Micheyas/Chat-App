@@ -2,18 +2,18 @@ services:
   - type: web
     name: chat-app-backend
     env: node
+    rootDir: backend
     buildCommand: npm install
     startCommand: node server.js
     envVars:
       - key: PORT
         value: 10000
       - key: DATABASE_URL
-        sync: false
+        value: postgresql://neondb_owner:npg_DjcUPrMWh3o8@ep-wispy-hall-auh7xire-pooler.c-10.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
       - key: ALLOWED_ORIGINS
         value: https://chat-app-frontend.onrender.com,https://your-frontend-url.vercel.app
       - key: CLOUDINARY_CLOUD_NAME
-        sync: false
+        value: hjahczot
       - key: CLOUDINARY_UPLOAD_PRESET
-        sync: false
+        value: chat_uploads
     plan: free
-    autoDeploy: false
