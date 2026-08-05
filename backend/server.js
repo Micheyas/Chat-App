@@ -77,11 +77,11 @@ io.on('connection', (socket) => {
       
       console.log(`${username} joined the chat`);
       
-      // Broadcast to all users that someone joined
-      io.emit('user-joined', username);
-      
-      // Send current users list to the new user
+      // Send current users list to everyone (including the new user)
       io.emit('users-list', Object.values(users).map(u => u.username));
+      
+      // Broadcast to all users that someone joined
+      socket.broadcast.emit('user-joined', username);
     } catch (err) {
       console.error('Error joining chat:', err);
     }

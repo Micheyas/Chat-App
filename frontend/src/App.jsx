@@ -34,7 +34,12 @@ function App() {
     });
 
     socket.on('user-joined', (joinedUsername) => {
-      setUsers(prev => [...prev, joinedUsername]);
+      setUsers(prev => {
+        if (!prev.includes(joinedUsername)) {
+          return [...prev, joinedUsername];
+        }
+        return prev;
+      });
     });
 
     socket.on('user-left', (leftUsername) => {
