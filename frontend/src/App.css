@@ -10,6 +10,36 @@ body {
   color: #ffffff;
 }
 
+.loading-more {
+  text-align: center;
+  padding: 10px;
+  color: #888;
+  font-size: 14px;
+}
+
+.message-image {
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: 8px;
+  margin: 5px 0;
+}
+
+.message-document {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #0088cc;
+  text-decoration: none;
+  padding: 8px 12px;
+  background: rgba(0, 136, 204, 0.1);
+  border-radius: 8px;
+  margin: 5px 0;
+}
+
+.message-document:hover {
+  background: rgba(0, 136, 204, 0.2);
+}
+
 /* Join Screen */
 .join-container {
   display: flex;

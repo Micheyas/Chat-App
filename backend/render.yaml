@@ -7,7 +7,13 @@ services:
     envVars:
       - key: PORT
         value: 10000
+      - key: DATABASE_URL
+        sync: false
       - key: ALLOWED_ORIGINS
         value: https://chat-app-frontend.onrender.com,https://your-frontend-url.vercel.app
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_UPLOAD_PRESET
+        sync: false
     plan: free
     autoDeploy: false
