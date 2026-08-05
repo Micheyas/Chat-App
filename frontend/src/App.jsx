@@ -20,7 +20,7 @@ function App() {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState([]);
   const [users, setUsers] = useState([]);
-  const [showChatList, setShowChatList] = useState(true);
+  const [showChatList, setShowChatList] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -201,7 +201,26 @@ function App() {
             <h3>General Chat</h3>
             <span className="chat-view-status">{users.length} online</span>
           </div>
+          <button className="users-toggle" onClick={() => setShowChatList(!showChatList)}>
+            👥 Users
+          </button>
         </div>
+        
+        {showChatList && (
+          <div className="users-panel">
+            <h4>Online Users</h4>
+            <div className="users-list">
+              {users.map((user, index) => (
+                <div key={index} className="user-item">
+                  <div className="user-avatar-small">{user.charAt(0).toUpperCase()}</div>
+                  <span className="user-name-small">{user}</span>
+                  <span className="user-status-online">●</span>
+                </div>
+              ))}
+              {users.length === 0 && <p className="no-users">No users online yet</p>}
+            </div>
+          </div>
+        )}
         
         <div 
           className="messages-container"
