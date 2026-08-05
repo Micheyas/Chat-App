@@ -11,26 +11,18 @@ require('dotenv').config();
 const app = express();
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
-// Allow all origins — this is a public chat app.
-// To restrict to specific origins, set ALLOWED_ORIGINS as a comma-separated list.
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : [];
-
-app.use(cors({
-  origin: (origin, cb) => {
-    // Always allow: no-origin requests (mobile/curl), or if no allowlist set
-    if (!origin || allowedOrigins.length === 0) return cb(null, true);
-    if (allowedOrigins.includes(origin)) return cb(null, true);
-    cb(new Error(`CORS: origin ${origin} not allowed`));
-  },
+// Always open — no env var dependency. Any origin is allowed.
+const corsOptions = {
+  origin: true,           // reflect the request origin, allow all
   credentials: true,
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+};
 
-// Explicitly handle preflight for all routes (Express 5 compatible)
-app.options(/.*/, cors());
+app.use(cors(corsOptions));
+
+// Handle preflight for every route (Express 5 compatible — no wildcard string)
+app.options(/.*/, cors(corsOptions));
 
 app.use(express.json());
 
@@ -224,7 +216,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins.length > 0 ? allowedOrigins : '*',
+    origin: true,
     methods: ['GET', 'POST'],
     credentials: true
   }
