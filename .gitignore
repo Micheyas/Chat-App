@@ -7,3 +7,5 @@ dist-ssr
 *.local
 backend/.env
 frontend/.env
+frontend/.env.local
+frontend/.env.production
