@@ -7,13 +7,22 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cap:build": "vite build && npx cap sync android",
+    "cap:open": "npx cap open android",
+    "cap:sync": "npx cap sync android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/keyboard": "^8.0.5",
+    "@capacitor/splash-screen": "^8.0.2",
+    "@capacitor/status-bar": "^8.0.3",
+    "axios": "^1.7.9",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "socket.io-client": "^4.8.3",
-    "axios": "^1.7.9"
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",

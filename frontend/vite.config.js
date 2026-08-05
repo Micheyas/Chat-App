@@ -7,5 +7,7 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173
-  }
+  },
+  // Capacitor needs an absolute base path for the Android WebView
+  base: '/',
 })

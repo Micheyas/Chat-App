@@ -1,0 +1,30 @@
+{
+  "appId": "com.wegram.app",
+  "appName": "Wegram",
+  "webDir": "dist",
+  "server": {
+    "url": "https://chat-app-ik9n.onrender.com",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "backgroundColor": "#1a1a1a",
+      "showSpinner": false,
+      "androidSplashResourceName": "splash"
+    },
+    "StatusBar": {
+      "style": "Dark",
+      "backgroundColor": "#1a1a1a"
+    },
+    "Keyboard": {
+      "resize": "body",
+      "resizeOnFullScreen": true
+    }
+  }
+}
