@@ -4,10 +4,11 @@ import { BACKEND_URL } from '../socket';
 
 /**
  * JoinScreen — handles register / login.
- * Calls onAuth({ token, username, userId }) when successful.
+ * Calls onAuth({ token, username, userId, isAdmin }) when successful.
+ * Shows pending approval message after registration.
  */
 export default function JoinScreen({ onAuth }) {
-  const [mode, setMode] = useState('login'); // 'login' | 'register'
+  const [mode, setMode] = useState('login'); // 'login' | 'register' | 'pending'
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -29,13 +30,44 @@ export default function JoinScreen({ onAuth }) {
         username: username.trim(),
         password,
       });
-      onAuth(data); // { token, username, userId }
+      
+      // If registration successful but not approved, show pending screen
+      if (mode === 'register' && !data.token) {
+        setMode('pending');
+        setLoading(false);
+        return;
+      }
+      
+      onAuth(data); // { token, username, userId, isAdmin }
     } catch (err) {
       setError(err.response?.data?.error || 'Something went wrong. Try again.');
     } finally {
       setLoading(false);
     }
   };
+  
+  // Pending approval screen
+  if (mode === 'pending') {
+    return (
+      <div className="join-container">
+        <div className="join-box">
+          <div className="telegram-logo">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M21.928 2.628a1.143 1.143 0 0 0-1.516-1.508L2.428 9.378a1.143 1.143 0 0 0 .04 2.12l4.778 1.556 1.78 5.718a.571.571 0 0 0 .983.258l2.5-2.5 4.875 3.714a1.143 1.143 0 0 0 1.784-.666l2.57-15.65z" fill="#0088cc" />
+            </svg>
+          </div>
+          <h1>Registration Pending</h1>
+          <p style={{ color: '#aaa', marginBottom: '20px', lineHeight: '1.5' }}>
+            Your account <strong>{username}</strong> has been created and is waiting for admin approval. 
+            You'll be able to log in once an admin approves your account.
+          </p>
+          <button onClick={() => { setMode('login'); setUsername(''); setPassword(''); setError(''); }} className="join-button">
+            Back to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="join-container">
@@ -50,7 +82,7 @@ export default function JoinScreen({ onAuth }) {
           </svg>
         </div>
 
-        <h1>Telegram Clone</h1>
+        <h1>Wegram</h1>
 
         {/* Mode toggle */}
         <div className="auth-tabs">

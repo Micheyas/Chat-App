@@ -5,6 +5,7 @@ import JoinScreen from './components/JoinScreen';
 import RoomSidebar from './components/RoomSidebar';
 import MessageList from './components/MessageList';
 import MessageInput from './components/MessageInput';
+import AdminPanel from './components/AdminPanel';
 import './App.css';
 
 // ─── Session helpers ──────────────────────────────────────────────────────────
@@ -51,6 +52,9 @@ export default function App() {
 
   // Mobile sidebar visibility
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Admin panel visibility
+  const [showAdmin, setShowAdmin] = useState(false);
 
   // ── Restore session on mount ──────────────────────────────────────────────
   useEffect(() => {
@@ -253,8 +257,10 @@ export default function App() {
           users={users}
           username={auth.username}
           token={auth.token}
+          isAdmin={auth.isAdmin}
           onRoomCreated={handleRoomCreated}
           onLogout={handleLogout}
+          onShowAdmin={() => setShowAdmin(true)}
         />
       </div>
 
@@ -310,6 +316,11 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {/* Admin Panel (modal) */}
+      {showAdmin && auth.isAdmin && (
+        <AdminPanel token={auth.token} onClose={() => setShowAdmin(false)} />
+      )}
     </div>
   );
 }

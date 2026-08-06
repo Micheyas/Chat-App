@@ -43,14 +43,21 @@ function authMiddleware(req, res, next) {
   }
 }
 
+// ─── ADMIN MIDDLEWARE ─────────────────────────────────────────────────────────
+function adminMiddleware(req, res, next) {
+  if (!req.user || !req.user.isAdmin) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+}
+
 // ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 app.get('/', (_req, res) => res.send('Chat App Backend is running'));
 
 // ─── AUTH ROUTES ──────────────────────────────────────────────────────────────
 
 // POST /api/register
-// Usernames are NOT unique — anyone can pick any name.
-// Each registration creates a new account identified by its UUID.
+// New users are created with approved=false and need admin approval
 app.post('/api/register', async (req, res) => {
   const { username, password } = req.body;
   if (!username?.trim() || !password?.trim()) {
@@ -65,15 +72,21 @@ app.post('/api/register', async (req, res) => {
 
   try {
     const passwordHash = await bcrypt.hash(password, 12);
-    // Always insert a fresh row — no uniqueness check
+    // New users need approval (approved=false by default)
     const result = await pool.query(
-      `INSERT INTO users (username, email, password_hash)
-       VALUES ($1, $2, $3) RETURNING id, username`,
+      `INSERT INTO users (username, email, password_hash, approved)
+       VALUES ($1, $2, $3, FALSE) RETURNING id, username, approved`,
       [username.trim(), `${username.trim()}_${Date.now()}@chat.local`, passwordHash]
     );
     const user = result.rows[0];
-    const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
-    res.status(201).json({ token, username: user.username, userId: user.id });
+    
+    // Return success but indicate pending approval
+    res.status(201).json({ 
+      message: 'Registration successful. Waiting for admin approval.',
+      username: user.username,
+      userId: user.id,
+      approved: user.approved
+    });
   } catch (err) {
     console.error('Register error:', err);
     res.status(500).json({ error: 'Registration failed' });
@@ -81,8 +94,7 @@ app.post('/api/register', async (req, res) => {
 });
 
 // POST /api/login
-// Since multiple accounts can share the same username, we check all of them
-// and return the first one whose password matches.
+// Check if user is approved before allowing login
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username?.trim() || !password?.trim()) {
@@ -92,7 +104,7 @@ app.post('/api/login', async (req, res) => {
   try {
     // Fetch all accounts with this username (newest first)
     const result = await pool.query(
-      'SELECT id, username, password_hash FROM users WHERE username = $1 ORDER BY created_at DESC',
+      'SELECT id, username, password_hash, approved, is_admin FROM users WHERE username = $1 ORDER BY created_at DESC',
       [username.trim()]
     );
     if (result.rows.length === 0) {
@@ -112,11 +124,86 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    const token = jwt.sign({ userId: matched.id, username: matched.username }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, username: matched.username, userId: matched.id });
+    // Check if user is approved
+    if (!matched.approved) {
+      return res.status(403).json({ error: 'Account pending admin approval' });
+    }
+
+    const token = jwt.sign({ 
+      userId: matched.id, 
+      username: matched.username,
+      isAdmin: matched.is_admin 
+    }, JWT_SECRET, { expiresIn: '7d' });
+    
+    res.json({ 
+      token, 
+      username: matched.username, 
+      userId: matched.id,
+      isAdmin: matched.is_admin
+    });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// ─── ADMIN ROUTES ─────────────────────────────────────────────────────────────
+
+// GET /api/admin/pending-users — list all users waiting for approval
+app.get('/api/admin/pending-users', authMiddleware, adminMiddleware, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, username, email, created_at 
+       FROM users 
+       WHERE approved = FALSE 
+       ORDER BY created_at DESC`
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Failed to fetch pending users:', err);
+    res.status(500).json({ error: 'Failed to fetch pending users' });
+  }
+});
+
+// POST /api/admin/approve/:userId — approve a pending user
+app.post('/api/admin/approve/:userId', authMiddleware, adminMiddleware, async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const { rows } = await pool.query(
+      `UPDATE users SET approved = TRUE WHERE id = $1 RETURNING id, username, approved`,
+      [userId]
+    );
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ message: 'User approved', user: rows[0] });
+  } catch (err) {
+    console.error('Failed to approve user:', err);
+    res.status(500).json({ error: 'Failed to approve user' });
+  }
+});
+
+// DELETE /api/admin/reject/:userId — reject/delete a pending user
+app.delete('/api/admin/reject/:userId', authMiddleware, adminMiddleware, async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const { rows } = await pool.query(
+      `DELETE FROM users WHERE id = $1 AND approved = FALSE RETURNING id, username`,
+      [userId]
+    );
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found or already approved' });
+    }
+
+    res.json({ message: 'User rejected', user: rows[0] });
+  } catch (err) {
+    console.error('Failed to reject user:', err);
+    res.status(500).json({ error: 'Failed to reject user' });
   }
 });
 

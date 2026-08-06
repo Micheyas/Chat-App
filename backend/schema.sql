@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS users (
   username      VARCHAR(50)  NOT NULL,          -- no UNIQUE constraint
   email         VARCHAR(255) NOT NULL,           -- no UNIQUE constraint
   password_hash TEXT,
+  is_admin      BOOLEAN DEFAULT FALSE,           -- admin flag
+  approved      BOOLEAN DEFAULT FALSE,           -- approval status
   created_at    TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -16,6 +18,8 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_username_key;
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS approved BOOLEAN DEFAULT FALSE;
 
 -- ─── ROOMS ───────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS rooms (
@@ -26,7 +30,10 @@ CREATE TABLE IF NOT EXISTS rooms (
 );
 
 -- Seed the default room (idempotent)
-INSERT INTO rooms (name) VALUES ('general') ON CONFLICT (name) DO NOTHING;
+INSERT INTO rooms (name) VALUES ('Secret') ON CONFLICT (name) DO NOTHING;
+
+-- Rename 'general' to 'Secret' if it exists
+UPDATE rooms SET name = 'Secret' WHERE name = 'general';
 
 -- ─── MESSAGES ────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS messages (
