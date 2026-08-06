@@ -1419,14 +1419,19 @@ body {
 
 /* ─── Soft-deleted message (admin view) ──────────────────────────────────── */
 .message-bubble--deleted {
-  background: rgba(248,113,113,.08) !important;
-  border: 1px dashed rgba(248,113,113,.3) !important;
+  border: 1px dashed rgba(248,113,113,.35) !important;
+  opacity: 0.75;
 }
 
-.deleted-msg-text {
-  font-size: 13px;
+.deleted-badge {
+  font-size: 10px;
   color: #f87171;
-  font-style: italic;
+  background: rgba(248,113,113,.12);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  letter-spacing: .3px;
+  text-transform: uppercase;
 }
 
 /* ─── Users section with last seen ──────────────────────────────────────── */

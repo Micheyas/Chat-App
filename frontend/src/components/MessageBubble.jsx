@@ -41,25 +41,16 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit })
 
   const canDelete = isOwn || isAdmin;
 
-  // Admin sees soft-deleted messages as a placeholder; regular users never receive them
+  // Admin sees soft-deleted messages in full with a deleted badge
+  // Regular users never receive deleted messages from the server at all
   if (msg.deleted) {
     if (!isAdmin) return null;
-    return (
-      <div className={`message ${isOwn ? 'own-message' : 'other-message'}`}>
-        <div className="message-bubble message-bubble--deleted">
-          {!isOwn && <span className="message-sender">{msg.username}</span>}
-          <span className="deleted-msg-text">🗑️ This message was deleted</span>
-          <div className="message-meta">
-            <span className="message-time">{formatTime(msg.created_at)}</span>
-          </div>
-        </div>
-      </div>
-    );
+    // Fall through to normal render — just mark it visually as deleted
   }
 
   return (
     <div className={`message ${isOwn ? 'own-message' : 'other-message'}`}>
-      <div className="message-bubble">
+      <div className={`message-bubble${msg.deleted ? ' message-bubble--deleted' : ''}`}>
         {/* Sender name (only for other people's messages) */}
         {!isOwn && <span className="message-sender">{msg.username}</span>}
 
@@ -96,6 +87,7 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit })
         {!editing && (
           <div className="message-meta">
             <span className="message-time">{formatTime(msg.created_at)}</span>
+            {msg.deleted && <span className="deleted-badge">deleted</span>}
 
             {isOwn && (
               <span className="message-status">
