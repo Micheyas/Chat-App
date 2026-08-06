@@ -207,6 +207,46 @@ app.delete('/api/admin/reject/:userId', authMiddleware, adminMiddleware, async (
   }
 });
 
+// ─── PROFILE ROUTES ───────────────────────────────────────────────────────────
+
+// PATCH /api/me — user updates their own username and/or password
+app.patch('/api/me', authMiddleware, async (req, res) => {
+  const { username, password } = req.body;
+  const userId = req.user.userId;
+
+  if (!username?.trim() && !password?.trim()) {
+    return res.status(400).json({ error: 'Provide a new username or password' });
+  }
+
+  try {
+    if (username?.trim()) {
+      await pool.query('UPDATE users SET username = $1 WHERE id = $2', [username.trim(), userId]);
+    }
+    if (password?.trim()) {
+      if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      const hash = await bcrypt.hash(password, 12);
+      await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, userId]);
+    }
+
+    const { rows } = await pool.query(
+      'SELECT id, username, is_admin FROM users WHERE id = $1', [userId]
+    );
+    const updated = rows[0];
+
+    // Issue a fresh token with updated username
+    const token = jwt.sign(
+      { userId: updated.id, username: updated.username, isAdmin: updated.is_admin },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({ token, username: updated.username, userId: updated.id, isAdmin: updated.is_admin });
+  } catch (err) {
+    console.error('Failed to update profile:', err);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
 // ─── ADMIN — USER MANAGEMENT ─────────────────────────────────────────────────
 
 // GET /api/admin/users — list ALL accounts
@@ -344,8 +384,10 @@ app.post('/api/rooms', authMiddleware, async (req, res) => {
 // ─── MESSAGES ROUTES ──────────────────────────────────────────────────────────
 
 // GET /api/messages — paginated history for a room
+// Admin sees all messages including soft-deleted; regular users only see non-deleted
 app.get('/api/messages', authMiddleware, async (req, res) => {
   const { room_id = 'general', limit = 30, before_id } = req.query;
+  const isAdmin = req.user.isAdmin || false;
 
   try {
     let query = `
@@ -356,6 +398,11 @@ app.get('/api/messages', authMiddleware, async (req, res) => {
     `;
     const params = [room_id];
 
+    // Regular users never see deleted messages
+    if (!isAdmin) {
+      query += ` AND m.deleted = FALSE`;
+    }
+
     if (before_id) {
       params.push(before_id);
       query += ` AND m.id < $${params.length}`;
@@ -365,7 +412,6 @@ app.get('/api/messages', authMiddleware, async (req, res) => {
     query += ` ORDER BY m.id DESC LIMIT $${params.length}`;
 
     const { rows } = await pool.query(query, params);
-    // Reverse so client gets [oldest → newest]
     res.json(rows.reverse());
   } catch (err) {
     console.error('Failed to fetch messages:', err);
@@ -487,7 +533,8 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Delete a message — sender OR admin can delete
+  // Delete a message — sender soft-deletes (admin can also soft-delete any message)
+  // Admin sees the message marked as deleted; regular users don't see it at all
   socket.on('delete_message', async ({ messageId, room_id }) => {
     const user = connectedUsers[socket.id];
     if (!user || !user.userId) return;
@@ -498,13 +545,17 @@ io.on('connection', (socket) => {
       );
       if (rows.length === 0) return;
 
-      // Allow if sender OR admin
       const isOwner = rows[0].sender_id === user.userId;
       const isAdmin = user.isAdmin === true;
       if (!isOwner && !isAdmin) return;
 
-      await pool.query('DELETE FROM messages WHERE id = $1', [messageId]);
-      io.to(room_id || 'general').emit('message_deleted', messageId);
+      // Soft delete — mark as deleted, keep in DB for admin visibility
+      await pool.query('UPDATE messages SET deleted = TRUE WHERE id = $1', [messageId]);
+
+      // Tell regular users to remove the message from their view
+      socket.to(room_id || 'general').emit('message_deleted', messageId);
+      // Also remove from sender's own view
+      socket.emit('message_deleted', messageId);
     } catch (err) {
       console.error('Failed to delete message via socket:', err);
     }

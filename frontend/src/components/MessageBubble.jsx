@@ -41,6 +41,22 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit })
 
   const canDelete = isOwn || isAdmin;
 
+  // Admin sees soft-deleted messages as a placeholder; regular users never receive them
+  if (msg.deleted) {
+    if (!isAdmin) return null;
+    return (
+      <div className={`message ${isOwn ? 'own-message' : 'other-message'}`}>
+        <div className="message-bubble message-bubble--deleted">
+          {!isOwn && <span className="message-sender">{msg.username}</span>}
+          <span className="deleted-msg-text">🗑️ This message was deleted</span>
+          <div className="message-meta">
+            <span className="message-time">{formatTime(msg.created_at)}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`message ${isOwn ? 'own-message' : 'other-message'}`}>
       <div className="message-bubble">

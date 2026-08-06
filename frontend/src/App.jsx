@@ -6,6 +6,7 @@ import RoomSidebar from './components/RoomSidebar';
 import MessageList from './components/MessageList';
 import MessageInput from './components/MessageInput';
 import AdminPanel from './components/AdminPanel';
+import SettingsPanel from './components/SettingsPanel';
 import './App.css';
 
 // ─── Session helpers ──────────────────────────────────────────────────────────
@@ -55,6 +56,9 @@ export default function App() {
 
   // Admin panel visibility
   const [showAdmin, setShowAdmin] = useState(false);
+
+  // Settings panel visibility
+  const [showSettings, setShowSettings] = useState(false);
 
   // ── Restore session on mount ──────────────────────────────────────────────
   useEffect(() => {
@@ -183,6 +187,14 @@ export default function App() {
     socket.disconnect();
   };
 
+  // Called when user saves new username/password — refresh token + session
+  const handleSettingsSaved = (data) => {
+    saveSession(data);
+    setAuth(data);
+    // Rejoin socket with new token so username updates live
+    socket.emit('join', { token: data.token, username: data.username });
+  };
+
   // ── Room handlers ─────────────────────────────────────────────────────────
   const handleRoomSelect = (room) => {
     if (activeRoom?.id === room.id) return;
@@ -272,6 +284,7 @@ export default function App() {
           onRoomCreated={handleRoomCreated}
           onLogout={handleLogout}
           onShowAdmin={() => setShowAdmin(true)}
+          onShowSettings={() => setShowSettings(true)}
         />
       </div>
 
@@ -333,6 +346,15 @@ export default function App() {
       {/* Admin Panel (modal) */}
       {showAdmin && auth.isAdmin && (
         <AdminPanel token={auth.token} onClose={() => setShowAdmin(false)} />
+      )}
+
+      {/* Settings Panel (modal) */}
+      {showSettings && (
+        <SettingsPanel
+          auth={auth}
+          onClose={() => setShowSettings(false)}
+          onSaved={handleSettingsSaved}
+        />
       )}
     </div>
   );

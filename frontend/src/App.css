@@ -1393,3 +1393,38 @@ body {
   transition: background .2s;
 }
 .edit-cancel-btn:hover { background: #4b4b4b; color: #fff; }
+
+/* ─── Settings button ────────────────────────────────────────────────────── */
+.settings-btn {
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  transition: color .2s, background .2s;
+}
+.settings-btn svg { width: 18px; height: 18px; }
+.settings-btn:hover { color: #0088cc; background: rgba(0,136,204,.12); }
+
+/* ─── Settings success message ───────────────────────────────────────────── */
+.settings-success {
+  color: #4ade80;
+  font-size: 13px;
+  text-align: center;
+  padding: 4px 0;
+}
+
+/* ─── Soft-deleted message (admin view) ──────────────────────────────────── */
+.message-bubble--deleted {
+  background: rgba(248,113,113,.08) !important;
+  border: 1px dashed rgba(248,113,113,.3) !important;
+}
+
+.deleted-msg-text {
+  font-size: 13px;
+  color: #f87171;
+  font-style: italic;
+}
