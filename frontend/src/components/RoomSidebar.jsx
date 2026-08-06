@@ -1,15 +1,48 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { BACKEND_URL } from '../socket';
 
 /**
- * RoomSidebar — shows the list of rooms, online users, and lets you create rooms.
+ * Formats a last_seen timestamp into a human-readable string.
+ * NULL means the user is currently online.
+ */
+function formatLastSeen(lastSeen) {
+  if (!lastSeen) return null; // online now
+  const diff = Math.floor((Date.now() - new Date(lastSeen)) / 1000);
+  if (diff < 60)   return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  return new Date(lastSeen).toLocaleDateString([], { day: '2-digit', month: 'short' });
+}
+
+/**
+ * RoomSidebar — shows the list of rooms, online users with last seen, and lets admins create rooms.
  */
 export default function RoomSidebar({ rooms, activeRoom, onRoomSelect, users, username, token, isAdmin, onRoomCreated, onLogout, onShowAdmin, onShowSettings }) {
   const [showNewRoom, setShowNewRoom] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating]       = useState(false);
   const [createError, setCreateError] = useState('');
+  const [lastSeenMap, setLastSeenMap] = useState({}); // { username: timestamp | null }
+  const [showAllUsers, setShowAllUsers] = useState(false);
+
+  // Fetch last-seen data periodically
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const { data } = await axios.get(`${BACKEND_URL}/api/users/last-seen`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const map = {};
+        data.forEach(u => { map[u.username] = u.last_seen; });
+        setLastSeenMap(map);
+      } catch { /* silent */ }
+    };
+    fetch();
+    const interval = setInterval(fetch, 30000); // refresh every 30s
+    return () => clearInterval(interval);
+  }, [token]);
 
   const handleCreateRoom = async (e) => {
     e.preventDefault();
@@ -68,17 +101,49 @@ export default function RoomSidebar({ rooms, activeRoom, onRoomSelect, users, us
         </div>
       </div>
 
-      {/* Online users strip */}
-      <div className="sidebar-section">
-        <p className="sidebar-section-title">Online ({users.length})</p>
-        <div className="users-scroll">
-          {users.map((u, i) => (
-            <div key={i} className="online-user-chip">
-              <div className="online-avatar">{u.charAt(0).toUpperCase()}</div>
-              <span className="online-name">{u}</span>
-            </div>
-          ))}
-          {users.length === 0 && <span className="sidebar-empty">No one online</span>}
+      {/* Users section — online + last seen */}
+      <div className="sidebar-section users-section">
+        <div className="sidebar-section-header">
+          <p className="sidebar-section-title">Users</p>
+          <button
+            className="toggle-users-btn"
+            onClick={() => setShowAllUsers(v => !v)}
+            title={showAllUsers ? 'Show online only' : 'Show all users'}
+          >
+            {showAllUsers ? 'Online' : 'All'}
+          </button>
+        </div>
+
+        <div className="users-list-vertical">
+          {Object.entries(lastSeenMap)
+            .filter(([uname, lastSeen]) => showAllUsers || users.includes(uname))
+            .sort(([, a], [, b]) => {
+              // Online (null) first, then by most recently seen
+              if (!a && b) return -1;
+              if (a && !b) return 1;
+              if (!a && !b) return 0;
+              return new Date(b) - new Date(a);
+            })
+            .map(([uname, lastSeen]) => {
+              const isOnline = users.includes(uname);
+              const lastSeenText = formatLastSeen(lastSeen);
+              return (
+                <div key={uname} className="user-row">
+                  <div className={`user-row-avatar ${isOnline ? 'user-row-avatar--online' : ''}`}>
+                    {uname.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="user-row-info">
+                    <span className="user-row-name">{uname}</span>
+                    <span className={`user-row-status ${isOnline ? 'user-row-status--online' : ''}`}>
+                      {isOnline ? '● Online' : lastSeenText ? `Last seen ${lastSeenText}` : 'Never seen'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          {Object.keys(lastSeenMap).length === 0 && (
+            <span className="sidebar-empty">No users yet</span>
+          )}
         </div>
       </div>
 

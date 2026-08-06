@@ -207,6 +207,21 @@ app.delete('/api/admin/reject/:userId', authMiddleware, adminMiddleware, async (
   }
 });
 
+// ─── USERS ROUTES ─────────────────────────────────────────────────────────────
+
+// GET /api/users/last-seen — returns last_seen for all users (NULL = currently online)
+app.get('/api/users/last-seen', authMiddleware, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT username, last_seen FROM users WHERE approved = TRUE ORDER BY username ASC'
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Failed to fetch last-seen:', err);
+    res.status(500).json({ error: 'Failed to fetch last seen' });
+  }
+});
+
 // ─── PROFILE ROUTES ───────────────────────────────────────────────────────────
 
 // PATCH /api/me — user updates their own username and/or password
@@ -479,6 +494,11 @@ io.on('connection', (socket) => {
 
     connectedUsers[socket.id] = { username, userId, isAdmin };
 
+    // Update last_seen to NULL (meaning online now) when user connects
+    if (userId) {
+      pool.query('UPDATE users SET last_seen = NULL WHERE id = $1', [userId]).catch(() => {});
+    }
+
     // Join the default room
     socket.join('general');
 
@@ -601,9 +621,17 @@ io.on('connection', (socket) => {
     const user = connectedUsers[socket.id];
     if (user) {
       console.log(`${user.username} disconnected`);
+
+      // Save last_seen timestamp when user goes offline
+      if (user.userId) {
+        pool.query('UPDATE users SET last_seen = NOW() WHERE id = $1', [user.userId]).catch(() => {});
+      }
+
       delete connectedUsers[socket.id];
       io.emit('user-left', user.username);
       io.emit('users-list', Object.values(connectedUsers).map(u => u.username));
+    }
+  });
     }
   });
 });
