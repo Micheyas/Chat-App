@@ -632,8 +632,6 @@ io.on('connection', (socket) => {
       io.emit('users-list', Object.values(connectedUsers).map(u => u.username));
     }
   });
-    }
-  });
 });
 
 const PORT = process.env.PORT || 5000;
