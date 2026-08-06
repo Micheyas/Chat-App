@@ -207,6 +207,99 @@ app.delete('/api/admin/reject/:userId', authMiddleware, adminMiddleware, async (
   }
 });
 
+// ─── ADMIN — USER MANAGEMENT ─────────────────────────────────────────────────
+
+// GET /api/admin/users — list ALL accounts
+app.get('/api/admin/users', authMiddleware, adminMiddleware, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, username, email, is_admin, approved, created_at
+       FROM users
+       ORDER BY created_at DESC`
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Failed to fetch users:', err);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// POST /api/admin/users — create a new account (auto-approved)
+app.post('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
+  const { username, password, isAdmin = false } = req.body;
+  if (!username?.trim() || !password?.trim()) {
+    return res.status(400).json({ error: 'Username and password are required' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+  try {
+    const passwordHash = await bcrypt.hash(password, 12);
+    const { rows } = await pool.query(
+      `INSERT INTO users (username, email, password_hash, approved, is_admin)
+       VALUES ($1, $2, $3, TRUE, $4) RETURNING id, username, is_admin, approved, created_at`,
+      [username.trim(), `${username.trim()}_${Date.now()}@chat.local`, passwordHash, isAdmin]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error('Failed to create user:', err);
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
+// PATCH /api/admin/users/:id — update username and/or password
+app.patch('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { username, password } = req.body;
+
+  if (!username?.trim() && !password?.trim()) {
+    return res.status(400).json({ error: 'Provide at least a new username or password' });
+  }
+
+  try {
+    const { rows: existing } = await pool.query('SELECT id FROM users WHERE id = $1', [id]);
+    if (existing.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    if (username?.trim()) {
+      await pool.query('UPDATE users SET username = $1 WHERE id = $2', [username.trim(), id]);
+    }
+    if (password?.trim()) {
+      if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      const hash = await bcrypt.hash(password, 12);
+      await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, id]);
+    }
+
+    const { rows } = await pool.query(
+      'SELECT id, username, is_admin, approved, created_at FROM users WHERE id = $1',
+      [id]
+    );
+    res.json({ message: 'User updated', user: rows[0] });
+  } catch (err) {
+    console.error('Failed to update user:', err);
+    res.status(500).json({ error: 'Failed to update user' });
+  }
+});
+
+// DELETE /api/admin/users/:id — delete any account
+app.delete('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  // Prevent admin from deleting themselves
+  if (id === req.user.userId) {
+    return res.status(400).json({ error: 'Cannot delete your own account' });
+  }
+  try {
+    const { rows } = await pool.query(
+      'DELETE FROM users WHERE id = $1 RETURNING id, username',
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ message: 'User deleted', user: rows[0] });
+  } catch (err) {
+    console.error('Failed to delete user:', err);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
 // ─── ROOMS ROUTES ─────────────────────────────────────────────────────────────
 
 // GET /api/rooms — list all rooms
