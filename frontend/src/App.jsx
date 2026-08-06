@@ -81,6 +81,7 @@ export default function App() {
   useEffect(() => {
     const onReceive = (msg) => setMessages(prev => [...prev, msg]);
     const onDeleted = (id) => setMessages(prev => prev.filter(m => m.id !== id));
+    const onEdited  = (msg) => setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: msg.content, edited: true } : m));
     const onUserJoined = (u) => setUsers(prev => prev.includes(u) ? prev : [...prev, u]);
     const onUserLeft = (u) => setUsers(prev => prev.filter(x => x !== u));
     const onUsersList = (list) => setUsers(list);
@@ -92,6 +93,7 @@ export default function App() {
 
     socket.on('receive_message', onReceive);
     socket.on('message_deleted', onDeleted);
+    socket.on('message_edited',  onEdited);
     socket.on('user-joined', onUserJoined);
     socket.on('user-left', onUserLeft);
     socket.on('users-list', onUsersList);
@@ -100,6 +102,7 @@ export default function App() {
     return () => {
       socket.off('receive_message', onReceive);
       socket.off('message_deleted', onDeleted);
+      socket.off('message_edited',  onEdited);
       socket.off('user-joined', onUserJoined);
       socket.off('user-left', onUserLeft);
       socket.off('users-list', onUsersList);
@@ -208,6 +211,14 @@ export default function App() {
     });
   };
 
+  const handleEditMessage = (messageId, content) => {
+    socket.emit('edit_message', {
+      messageId,
+      content,
+      room_id: String(activeRoom.id),
+    });
+  };
+
   // ── File upload ───────────────────────────────────────────────────────────
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
@@ -297,10 +308,12 @@ export default function App() {
             <MessageList
               messages={messages}
               username={auth.username}
+              isAdmin={auth.isAdmin}
               loading={loadingMsgs}
               hasMore={hasMore}
               onLoadMore={(id) => loadMessages(id)}
               onDeleteMessage={handleDeleteMessage}
+              onEditMessage={handleEditMessage}
               typingUsers={typingUsers}
             />
             <MessageInput

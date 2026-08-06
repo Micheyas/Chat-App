@@ -4,7 +4,7 @@ import MessageBubble from './MessageBubble';
 /**
  * MessageList — scrollable message history with infinite-scroll pagination.
  */
-export default function MessageList({ messages, username, loading, hasMore, onLoadMore, onDeleteMessage, typingUsers }) {
+export default function MessageList({ messages, username, isAdmin, loading, hasMore, onLoadMore, onDeleteMessage, onEditMessage, typingUsers }) {
   const bottomRef = useRef(null);
   const containerRef = useRef(null);
 
@@ -37,7 +37,9 @@ export default function MessageList({ messages, username, loading, hasMore, onLo
           key={msg.id ?? i}
           msg={msg}
           isOwn={msg.username === username}
+          isAdmin={isAdmin}
           onDelete={onDeleteMessage}
+          onEdit={onEditMessage}
         />
       ))}
 

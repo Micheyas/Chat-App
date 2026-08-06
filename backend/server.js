@@ -412,6 +412,7 @@ io.on('connection', (socket) => {
   socket.on('join', async ({ token, username: guestName } = {}) => {
     let username = guestName;
     let userId = null;
+    let isAdmin = false;
 
     // Validate JWT if provided
     if (token) {
@@ -419,6 +420,7 @@ io.on('connection', (socket) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         username = decoded.username;
         userId = decoded.userId;
+        isAdmin = decoded.isAdmin || false;
       } catch {
         // bad token — ignore, fall through to guest
       }
@@ -429,7 +431,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    connectedUsers[socket.id] = { username, userId };
+    connectedUsers[socket.id] = { username, userId, isAdmin };
 
     // Join the default room
     socket.join('general');
@@ -485,20 +487,52 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Delete a message — only sender
+  // Delete a message — sender OR admin can delete
   socket.on('delete_message', async ({ messageId, room_id }) => {
     const user = connectedUsers[socket.id];
     if (!user || !user.userId) return;
 
     try {
-      const { rows } = await pool.query('SELECT sender_id FROM messages WHERE id = $1', [messageId]);
+      const { rows } = await pool.query(
+        'SELECT sender_id FROM messages WHERE id = $1', [messageId]
+      );
       if (rows.length === 0) return;
-      if (rows[0].sender_id !== user.userId) return;
+
+      // Allow if sender OR admin
+      const isOwner = rows[0].sender_id === user.userId;
+      const isAdmin = user.isAdmin === true;
+      if (!isOwner && !isAdmin) return;
 
       await pool.query('DELETE FROM messages WHERE id = $1', [messageId]);
       io.to(room_id || 'general').emit('message_deleted', messageId);
     } catch (err) {
       console.error('Failed to delete message via socket:', err);
+    }
+  });
+
+  // Edit a message — only the original sender
+  socket.on('edit_message', async ({ messageId, content, room_id }) => {
+    const user = connectedUsers[socket.id];
+    if (!user || !user.userId) return;
+    if (!content?.trim()) return;
+
+    try {
+      const { rows } = await pool.query(
+        'SELECT sender_id FROM messages WHERE id = $1', [messageId]
+      );
+      if (rows.length === 0) return;
+      if (rows[0].sender_id !== user.userId) return;
+
+      const { rows: updated } = await pool.query(
+        `UPDATE messages SET content = $1, edited = TRUE WHERE id = $2 RETURNING *`,
+        [content.trim(), messageId]
+      );
+      if (updated.length === 0) return;
+
+      const msg = { ...updated[0], username: user.username };
+      io.to(room_id || 'general').emit('message_edited', msg);
+    } catch (err) {
+      console.error('Failed to edit message via socket:', err);
     }
   });
 

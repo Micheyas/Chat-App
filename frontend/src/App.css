@@ -1313,3 +1313,83 @@ body {
   flex-direction: column;
   gap: 14px;
 }
+
+/* ─── Message edit button ────────────────────────────────────────────────── */
+.edit-msg-btn {
+  background: none;
+  border: none;
+  color: transparent;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  transition: color .15s, background .15s;
+}
+.edit-msg-btn svg { width: 13px; height: 13px; }
+
+.message-bubble:hover .edit-msg-btn {
+  color: #60a5fa;
+}
+.edit-msg-btn:hover { background: rgba(96,165,250,.15); }
+
+/* ─── Edited label ───────────────────────────────────────────────────────── */
+.edited-label {
+  font-size: 10px;
+  color: #666;
+  font-style: italic;
+}
+
+/* ─── Inline edit input ──────────────────────────────────────────────────── */
+.edit-input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.edit-input {
+  width: 100%;
+  min-width: 200px;
+  padding: 8px 10px;
+  background: #1a1a1a;
+  border: 1px solid #0088cc;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 15px;
+  line-height: 1.4;
+  resize: none;
+  font-family: inherit;
+  outline: none;
+}
+
+.edit-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.edit-confirm-btn {
+  padding: 5px 12px;
+  background: #0088cc;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s;
+}
+.edit-confirm-btn:hover { background: #006699; }
+
+.edit-cancel-btn {
+  padding: 5px 12px;
+  background: #3b3b3b;
+  border: none;
+  border-radius: 6px;
+  color: #aaa;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s;
+}
+.edit-cancel-btn:hover { background: #4b4b4b; color: #fff; }
