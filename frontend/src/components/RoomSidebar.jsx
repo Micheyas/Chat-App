@@ -30,10 +30,8 @@ export default function RoomSidebar({
   // Listen for new DMs to bump unread counts in real time
   useEffect(() => {
     const onReceiveDM = (msg) => {
-      // Only increment unread for conversations we're not currently viewing
       setConversations(prev => prev.map(c => {
         if (String(c.id) !== String(msg.conv_id)) return c;
-        // Don't increment if this conv is currently active (DMView will mark read)
         const currentlyOpen = window.__activeDMId && String(window.__activeDMId) === String(c.id);
         if (currentlyOpen) return { ...c, last_message: msg.content, last_message_at: msg.created_at };
         return {
@@ -44,20 +42,31 @@ export default function RoomSidebar({
         };
       }));
     };
+
+    // When WE mark a conv as read, clear the badge
     const onDmRead = ({ convId: cid, readerId }) => {
-      // When the other person reads, clear any display unread that was optimistic
-      if (readerId !== userId) return; // this is us reading
+      if (String(readerId) !== String(userId)) return; // only care about our own reads
       setConversations(prev => prev.map(c =>
         String(c.id) === String(cid) ? { ...c, unread_count: 0 } : c
       ));
     };
-    socket.on('receive_dm',  onReceiveDM);
-    socket.on('dm_read',     onDmRead);
+
+    socket.on('receive_dm', onReceiveDM);
+    socket.on('dm_read',    onDmRead);
+
+    // Refetch from DB whenever window regains focus (catches offline-delivered messages)
+    const onFocus = () => fetchConversations();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) fetchConversations();
+    });
+
     return () => {
       socket.off('receive_dm', onReceiveDM);
       socket.off('dm_read',    onDmRead);
+      window.removeEventListener('focus', onFocus);
     };
-  }, [userId]);
+  }, [userId, fetchConversations]);
 
   // Fetch last-seen periodically
   const fetchLastSeen = useCallback(async () => {
@@ -84,9 +93,18 @@ export default function RoomSidebar({
   useEffect(() => {
     fetchLastSeen();
     fetchConversations();
-    const i1 = setInterval(fetchLastSeen,     30000);
-    const i2 = setInterval(fetchConversations, 15000);
-    return () => { clearInterval(i1); clearInterval(i2); };
+    const i1 = setInterval(fetchLastSeen,      30000);
+    const i2 = setInterval(fetchConversations,  5000); // fast poll — catches offline messages
+
+    // Refetch when socket reconnects (user came back online)
+    const onReconnect = () => fetchConversations();
+    socket.on('connect', onReconnect);
+
+    return () => {
+      clearInterval(i1);
+      clearInterval(i2);
+      socket.off('connect', onReconnect);
+    };
   }, [fetchLastSeen, fetchConversations]);
 
   const handleCreateRoom = async (e) => {
