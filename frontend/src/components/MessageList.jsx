@@ -1,19 +1,15 @@
 import { useEffect, useRef } from 'react';
 import MessageBubble from './MessageBubble';
 
-/**
- * MessageList — scrollable message history with infinite-scroll pagination.
- */
-export default function MessageList({ messages, username, isAdmin, loading, hasMore, onLoadMore, onDeleteMessage, onEditMessage, typingUsers }) {
-  const bottomRef = useRef(null);
+export default function MessageList({ messages, username, isAdmin, loading, hasMore, onLoadMore, onDeleteMessage, onEditMessage, onReplyMessage, typingUsers }) {
+  const bottomRef    = useRef(null);
   const containerRef = useRef(null);
 
-  // Scroll to bottom when new messages arrive
+  // Scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Trigger load-more when scrolled to top
   const handleScroll = () => {
     if (!containerRef.current || loading || !hasMore) return;
     if (containerRef.current.scrollTop === 0 && messages.length > 0) {
@@ -21,15 +17,10 @@ export default function MessageList({ messages, username, isAdmin, loading, hasM
     }
   };
 
-  // Typing users excluding self
-  const others = typingUsers.filter(u => u !== username);
+  const others = (typingUsers || []).filter(u => u !== username);
 
   return (
-    <div
-      className="messages-container"
-      ref={containerRef}
-      onScroll={handleScroll}
-    >
+    <div className="messages-container" ref={containerRef} onScroll={handleScroll}>
       {loading && <div className="loading-more">Loading older messages…</div>}
 
       {messages.map((msg, i) => (
@@ -40,19 +31,15 @@ export default function MessageList({ messages, username, isAdmin, loading, hasM
           isAdmin={isAdmin}
           onDelete={onDeleteMessage}
           onEdit={onEditMessage}
+          onReply={onReplyMessage}
         />
       ))}
 
-      {/* Typing indicator */}
       {others.length > 0 && (
         <div className="typing-indicator">
-          <span className="typing-dots">
-            <span/><span/><span/>
-          </span>
+          <span className="typing-dots"><span/><span/><span/></span>
           <span className="typing-text">
-            {others.length === 1
-              ? `${others[0]} is typing…`
-              : `${others.slice(0, 2).join(', ')} are typing…`}
+            {others.length === 1 ? `${others[0]} is typing…` : `${others.slice(0,2).join(', ')} are typing…`}
           </span>
         </div>
       )}

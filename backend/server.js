@@ -56,8 +56,7 @@ app.get('/', (_req, res) => res.send('Chat App Backend is running'));
 
 // ─── AUTH ROUTES ──────────────────────────────────────────────────────────────
 
-// POST /api/register
-// New users are created with approved=false and need admin approval
+// POST /api/register — unique username enforced
 app.post('/api/register', async (req, res) => {
   const { username, password } = req.body;
   if (!username?.trim() || !password?.trim()) {
@@ -72,29 +71,28 @@ app.post('/api/register', async (req, res) => {
 
   try {
     const passwordHash = await bcrypt.hash(password, 12);
-    // New users need approval (approved=false by default)
     const result = await pool.query(
       `INSERT INTO users (username, email, password_hash, approved)
        VALUES ($1, $2, $3, FALSE) RETURNING id, username, approved`,
       [username.trim(), `${username.trim()}_${Date.now()}@chat.local`, passwordHash]
     );
     const user = result.rows[0];
-    
-    // Return success but indicate pending approval
-    res.status(201).json({ 
+    res.status(201).json({
       message: 'Registration successful. Waiting for admin approval.',
       username: user.username,
       userId: user.id,
       approved: user.approved
     });
   } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Username already taken' });
+    }
     console.error('Register error:', err);
     res.status(500).json({ error: 'Registration failed' });
   }
 });
 
 // POST /api/login
-// Check if user is approved before allowing login
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username?.trim() || !password?.trim()) {
@@ -102,45 +100,28 @@ app.post('/api/login', async (req, res) => {
   }
 
   try {
-    // Fetch all accounts with this username (newest first)
     const result = await pool.query(
-      'SELECT id, username, password_hash, approved, is_admin FROM users WHERE username = $1 ORDER BY created_at DESC',
+      'SELECT id, username, password_hash, approved, is_admin FROM users WHERE username = $1',
       [username.trim()]
     );
     if (result.rows.length === 0) {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
+    const user = result.rows[0];
 
-    // Find the first account whose password matches
-    let matched = null;
-    for (const row of result.rows) {
-      if (row.password_hash && await bcrypt.compare(password, row.password_hash)) {
-        matched = row;
-        break;
-      }
-    }
-
-    if (!matched) {
+    if (!user.password_hash || !(await bcrypt.compare(password, user.password_hash))) {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
-
-    // Check if user is approved
-    if (!matched.approved) {
+    if (!user.approved) {
       return res.status(403).json({ error: 'Account pending admin approval' });
     }
 
-    const token = jwt.sign({ 
-      userId: matched.id, 
-      username: matched.username,
-      isAdmin: matched.is_admin 
-    }, JWT_SECRET, { expiresIn: '7d' });
-    
-    res.json({ 
-      token, 
-      username: matched.username, 
-      userId: matched.id,
-      isAdmin: matched.is_admin
-    });
+    const token = jwt.sign(
+      { userId: user.id, username: user.username, isAdmin: user.is_admin },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    res.json({ token, username: user.username, userId: user.id, isAdmin: user.is_admin });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Login failed' });
@@ -235,7 +216,12 @@ app.patch('/api/me', authMiddleware, async (req, res) => {
 
   try {
     if (username?.trim()) {
-      await pool.query('UPDATE users SET username = $1 WHERE id = $2', [username.trim(), userId]);
+      try {
+        await pool.query('UPDATE users SET username = $1 WHERE id = $2', [username.trim(), userId]);
+      } catch (e) {
+        if (e.code === '23505') return res.status(409).json({ error: 'Username already taken' });
+        throw e;
+      }
     }
     if (password?.trim()) {
       if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
@@ -297,6 +283,9 @@ app.post('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) =
     );
     res.status(201).json(rows[0]);
   } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Username already taken' });
+    }
     console.error('Failed to create user:', err);
     res.status(500).json({ error: 'Failed to create user' });
   }
@@ -355,6 +344,112 @@ app.delete('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, 
   }
 });
 
+// ─── DIRECT MESSAGE ROUTES ────────────────────────────────────────────────────
+
+// POST /api/dm/conversations — start or get existing DM with a user
+app.post('/api/dm/conversations', authMiddleware, async (req, res) => {
+  const myId = req.user.userId;
+  const { targetUsername } = req.body;
+  if (!targetUsername?.trim()) return res.status(400).json({ error: 'targetUsername required' });
+
+  try {
+    const { rows: targets } = await pool.query(
+      'SELECT id, username FROM users WHERE username = $1 AND approved = TRUE',
+      [targetUsername.trim()]
+    );
+    if (targets.length === 0) return res.status(404).json({ error: 'User not found' });
+    const targetId = targets[0].id;
+    if (targetId === myId) return res.status(400).json({ error: 'Cannot DM yourself' });
+
+    // Normalise order so (A,B) and (B,A) are the same row
+    const [a, b] = [myId, targetId].sort();
+
+    const { rows } = await pool.query(
+      `INSERT INTO conversations (user_a, user_b)
+       VALUES ($1, $2)
+       ON CONFLICT (user_a, user_b) DO UPDATE SET user_a = EXCLUDED.user_a
+       RETURNING *`,
+      [a, b]
+    );
+    res.json({ ...rows[0], other_username: targets[0].username });
+  } catch (err) {
+    console.error('Failed to start conversation:', err);
+    res.status(500).json({ error: 'Failed to start conversation' });
+  }
+});
+
+// GET /api/dm/conversations — list all my conversations
+app.get('/api/dm/conversations', authMiddleware, async (req, res) => {
+  const myId = req.user.userId;
+  try {
+    const { rows } = await pool.query(
+      `SELECT c.*,
+              CASE WHEN c.user_a = $1 THEN ub.username ELSE ua.username END AS other_username,
+              CASE WHEN c.user_a = $1 THEN ub.id ELSE ua.id END AS other_user_id,
+              CASE WHEN c.user_a = $1 THEN ub.last_seen ELSE ua.last_seen END AS other_last_seen
+       FROM conversations c
+       JOIN users ua ON c.user_a = ua.id
+       JOIN users ub ON c.user_b = ub.id
+       WHERE c.user_a = $1 OR c.user_b = $1
+       ORDER BY c.last_message_at DESC NULLS LAST`,
+      [myId]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Failed to fetch conversations:', err);
+    res.status(500).json({ error: 'Failed to fetch conversations' });
+  }
+});
+
+// GET /api/dm/:convId/messages — paginated DM messages
+app.get('/api/dm/:convId/messages', authMiddleware, async (req, res) => {
+  const { convId } = req.params;
+  const { limit = 30, before_id } = req.query;
+  const myId = req.user.userId;
+
+  try {
+    // Verify user is part of this conversation
+    const { rows: conv } = await pool.query(
+      'SELECT id FROM conversations WHERE id = $1 AND (user_a = $2 OR user_b = $2)',
+      [convId, myId]
+    );
+    if (conv.length === 0) return res.status(403).json({ error: 'Not your conversation' });
+
+    let query = `
+      SELECT dm.*, u.username,
+             rm.content AS reply_content, rm.message_type AS reply_message_type,
+             ru.username AS reply_username
+      FROM dm_messages dm
+      JOIN users u ON dm.sender_id = u.id
+      LEFT JOIN dm_messages rm ON dm.reply_to_id = rm.id
+      LEFT JOIN users ru ON rm.sender_id = ru.id
+      WHERE dm.conv_id = $1 AND dm.deleted = FALSE
+    `;
+    const params = [convId];
+
+    if (before_id) {
+      params.push(before_id);
+      query += ` AND dm.id < $${params.length}`;
+    }
+    params.push(limit);
+    query += ` ORDER BY dm.id DESC LIMIT $${params.length}`;
+
+    const { rows } = await pool.query(query, params);
+    const shaped = rows.map(r => {
+      const msg = { ...r };
+      if (r.reply_to_id) {
+        msg.reply_to = { content: r.reply_content, message_type: r.reply_message_type, reply_username: r.reply_username };
+      }
+      delete msg.reply_content; delete msg.reply_message_type; delete msg.reply_username;
+      return msg;
+    });
+    res.json(shaped.reverse());
+  } catch (err) {
+    console.error('Failed to fetch DM messages:', err);
+    res.status(500).json({ error: 'Failed to fetch DM messages' });
+  }
+});
+
 // ─── ROOMS ROUTES ─────────────────────────────────────────────────────────────
 
 // GET /api/rooms — list all rooms
@@ -406,17 +501,20 @@ app.get('/api/messages', authMiddleware, async (req, res) => {
 
   try {
     let query = `
-      SELECT m.*, u.username
+      SELECT m.*,
+             u.username,
+             rm.content    AS reply_content,
+             rm.message_type AS reply_message_type,
+             ru.username   AS reply_username
       FROM messages m
       JOIN users u ON m.sender_id = u.id
+      LEFT JOIN messages rm ON m.reply_to_id = rm.id
+      LEFT JOIN users ru ON rm.sender_id = ru.id
       WHERE m.room_id = $1
     `;
     const params = [room_id];
 
-    // Regular users never see deleted messages
-    if (!isAdmin) {
-      query += ` AND m.deleted = FALSE`;
-    }
+    if (!isAdmin) query += ` AND m.deleted = FALSE`;
 
     if (before_id) {
       params.push(before_id);
@@ -427,7 +525,24 @@ app.get('/api/messages', authMiddleware, async (req, res) => {
     query += ` ORDER BY m.id DESC LIMIT $${params.length}`;
 
     const { rows } = await pool.query(query, params);
-    res.json(rows.reverse());
+
+    // Shape reply_to as nested object
+    const shaped = rows.map(r => {
+      const msg = { ...r };
+      if (r.reply_to_id) {
+        msg.reply_to = {
+          content: r.reply_content,
+          message_type: r.reply_message_type,
+          reply_username: r.reply_username,
+        };
+      }
+      delete msg.reply_content;
+      delete msg.reply_message_type;
+      delete msg.reply_username;
+      return msg;
+    });
+
+    res.json(shaped.reverse());
   } catch (err) {
     console.error('Failed to fetch messages:', err);
     res.status(500).json({ error: 'Failed to fetch messages' });
@@ -519,7 +634,7 @@ io.on('connection', (socket) => {
 
   // Send a message
   socket.on('send_message', async (data) => {
-    const { room_id = 'general', content, message_type = 'text' } = data;
+    const { room_id = 'general', content, message_type = 'text', reply_to_id } = data;
     const user = connectedUsers[socket.id];
 
     if (!user) return;
@@ -542,11 +657,21 @@ io.on('connection', (socket) => {
 
     try {
       const { rows } = await pool.query(
-        `INSERT INTO messages (room_id, sender_id, content, message_type)
-         VALUES ($1, $2, $3, $4) RETURNING *`,
-        [room_id, senderId, content, message_type]
+        `INSERT INTO messages (room_id, sender_id, content, message_type, reply_to_id)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [room_id, senderId, content, message_type, reply_to_id || null]
       );
       const msg = { ...rows[0], username: user.username };
+
+      // If reply, attach the original message snippet
+      if (reply_to_id) {
+        const { rows: orig } = await pool.query(
+          'SELECT m.content, m.message_type, u.username as reply_username FROM messages m JOIN users u ON m.sender_id=u.id WHERE m.id=$1',
+          [reply_to_id]
+        );
+        if (orig.length > 0) msg.reply_to = orig[0];
+      }
+
       io.to(room_id).emit('receive_message', msg);
     } catch (err) {
       console.error('Failed to save message:', err);
@@ -615,6 +740,91 @@ io.on('connection', (socket) => {
       username: user.username,
       isTyping
     });
+  });
+
+  // DM typing indicator
+  socket.on('dm_typing', ({ convId, isTyping }) => {
+    const user = connectedUsers[socket.id];
+    if (!user) return;
+    socket.to(`dm_${convId}`).emit('dm_user_typing', { username: user.username, isTyping });
+  });
+
+  // Join a DM conversation room
+  socket.on('join_dm', (convId) => {
+    socket.join(`dm_${convId}`);
+  });
+
+  // Leave a DM conversation room
+  socket.on('leave_dm', (convId) => {
+    socket.leave(`dm_${convId}`);
+  });
+
+  // Send a DM message
+  socket.on('send_dm', async ({ convId, content, message_type = 'text', reply_to_id }) => {
+    const user = connectedUsers[socket.id];
+    if (!user?.userId || !content?.trim()) return;
+
+    try {
+      // Verify user belongs to conversation
+      const { rows: conv } = await pool.query(
+        'SELECT user_a, user_b FROM conversations WHERE id = $1 AND (user_a = $2 OR user_b = $2)',
+        [convId, user.userId]
+      );
+      if (conv.length === 0) return;
+
+      const { rows } = await pool.query(
+        `INSERT INTO dm_messages (conv_id, sender_id, content, message_type, reply_to_id)
+         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [convId, user.userId, content.trim(), message_type, reply_to_id || null]
+      );
+      const msg = { ...rows[0], username: user.username };
+
+      // Attach reply snippet
+      if (reply_to_id) {
+        const { rows: orig } = await pool.query(
+          'SELECT dm.content, dm.message_type, u.username AS reply_username FROM dm_messages dm JOIN users u ON dm.sender_id=u.id WHERE dm.id=$1',
+          [reply_to_id]
+        );
+        if (orig.length > 0) msg.reply_to = orig[0];
+      }
+
+      // Update conversation last_message
+      await pool.query(
+        'UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2',
+        [content.trim().slice(0, 100), convId]
+      );
+
+      io.to(`dm_${convId}`).emit('receive_dm', msg);
+    } catch (err) {
+      console.error('Failed to send DM:', err);
+    }
+  });
+
+  // Edit a DM message — sender only
+  socket.on('edit_dm', async ({ messageId, content, convId }) => {
+    const user = connectedUsers[socket.id];
+    if (!user?.userId || !content?.trim()) return;
+    try {
+      const { rows: check } = await pool.query('SELECT sender_id FROM dm_messages WHERE id=$1', [messageId]);
+      if (!check.length || check[0].sender_id !== user.userId) return;
+      const { rows } = await pool.query(
+        'UPDATE dm_messages SET content=$1, edited=TRUE WHERE id=$2 RETURNING *',
+        [content.trim(), messageId]
+      );
+      io.to(`dm_${convId}`).emit('dm_edited', { ...rows[0], username: user.username });
+    } catch (err) { console.error('Failed to edit DM:', err); }
+  });
+
+  // Delete a DM message — sender only (soft delete)
+  socket.on('delete_dm', async ({ messageId, convId }) => {
+    const user = connectedUsers[socket.id];
+    if (!user?.userId) return;
+    try {
+      const { rows: check } = await pool.query('SELECT sender_id FROM dm_messages WHERE id=$1', [messageId]);
+      if (!check.length || check[0].sender_id !== user.userId) return;
+      await pool.query('UPDATE dm_messages SET deleted=TRUE WHERE id=$1', [messageId]);
+      io.to(`dm_${convId}`).emit('dm_deleted', messageId);
+    } catch (err) { console.error('Failed to delete DM:', err); }
   });
 
   socket.on('disconnect', () => {
