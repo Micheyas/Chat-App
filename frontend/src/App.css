@@ -1867,3 +1867,44 @@ body {
   .emoji-picker-wrap { right: -80px; }
   .back-to-rooms { display: flex !important; }
 }
+
+/* ─── Read receipt tick states ───────────────────────────────────────────── */
+.message-status--sent {
+  color: #888;   /* grey single tick = sent, not yet read */
+}
+.message-status--read {
+  color: #0088cc; /* blue double tick = read by recipient */
+}
+
+/* ─── Unread badge on DM list items ──────────────────────────────────────── */
+.unread-badge {
+  background: #0088cc;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.chat-list-row-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.chat-list-name--unread {
+  font-weight: 700;
+  color: #fff;
+}
+
+.chat-list-preview--unread {
+  color: #ccc;
+  font-weight: 500;
+}

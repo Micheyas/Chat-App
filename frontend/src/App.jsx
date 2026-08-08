@@ -148,6 +148,8 @@ export default function App() {
   // ── DM handlers ───────────────────────────────────────────────────────────
   const handleDMSelect = (conv) => {
     setActiveDM(conv);
+    // Let sidebar's socket listener know which DM is open (to skip incrementing unread)
+    window.__activeDMId = conv.id;
     setSidebarOpen(false);
   };
 
@@ -216,7 +218,11 @@ export default function App() {
         <DMView
           conv={activeDM}
           auth={auth}
-          onClose={() => { setActiveDM(null); }}
+          onClose={() => { setActiveDM(null); window.__activeDMId = null; }}
+          onUnreadCleared={(convId) => {
+            // Tell sidebar to zero-out the badge for this conv
+            window.__activeDMId = convId;
+          }}
         />
       ) : (
         <div className="chat-view-container">

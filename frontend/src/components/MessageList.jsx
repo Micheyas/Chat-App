@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import MessageBubble from './MessageBubble';
 
-export default function MessageList({ messages, username, isAdmin, loading, hasMore, onLoadMore, onDeleteMessage, onEditMessage, onReplyMessage, typingUsers }) {
+export default function MessageList({ messages, username, isAdmin, loading, hasMore, onLoadMore, onDeleteMessage, onEditMessage, onReplyMessage, typingUsers, otherLastReadId, myUserId }) {
   const bottomRef    = useRef(null);
   const containerRef = useRef(null);
 
@@ -32,6 +32,8 @@ export default function MessageList({ messages, username, isAdmin, loading, hasM
           onDelete={onDeleteMessage}
           onEdit={onEditMessage}
           onReply={onReplyMessage}
+          otherLastReadId={otherLastReadId}
+          myUserId={myUserId}
         />
       ))}
 

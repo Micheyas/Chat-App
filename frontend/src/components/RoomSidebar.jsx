@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { BACKEND_URL } from '../socket';
+import socket, { BACKEND_URL } from '../socket';
 
 function fmtSeen(ts) {
   if (!ts) return null;
@@ -26,6 +26,38 @@ export default function RoomSidebar({
   const [conversations, setConversations] = useState([]);
   const [lastSeenMap,   setLastSeenMap]   = useState({});
   const [startingDM,    setStartingDM]    = useState(false);
+
+  // Listen for new DMs to bump unread counts in real time
+  useEffect(() => {
+    const onReceiveDM = (msg) => {
+      // Only increment unread for conversations we're not currently viewing
+      setConversations(prev => prev.map(c => {
+        if (String(c.id) !== String(msg.conv_id)) return c;
+        // Don't increment if this conv is currently active (DMView will mark read)
+        const currentlyOpen = window.__activeDMId && String(window.__activeDMId) === String(c.id);
+        if (currentlyOpen) return { ...c, last_message: msg.content, last_message_at: msg.created_at };
+        return {
+          ...c,
+          last_message: msg.content,
+          last_message_at: msg.created_at,
+          unread_count: (Number(c.unread_count) || 0) + 1,
+        };
+      }));
+    };
+    const onDmRead = ({ convId: cid, readerId }) => {
+      // When the other person reads, clear any display unread that was optimistic
+      if (readerId !== userId) return; // this is us reading
+      setConversations(prev => prev.map(c =>
+        String(c.id) === String(cid) ? { ...c, unread_count: 0 } : c
+      ));
+    };
+    socket.on('receive_dm',  onReceiveDM);
+    socket.on('dm_read',     onDmRead);
+    return () => {
+      socket.off('receive_dm', onReceiveDM);
+      socket.off('dm_read',    onDmRead);
+    };
+  }, [userId]);
 
   // Fetch last-seen periodically
   const fetchLastSeen = useCallback(async () => {
@@ -212,26 +244,38 @@ export default function RoomSidebar({
                 <p className="sidebar-section-title">Direct Messages</p>
               </div>
               <div className="chat-list">
-                {enrichedConvs.map(conv => (
-                  <button key={conv.id}
-                    className={`chat-list-item ${activeDM?.id === conv.id ? 'chat-list-item--active' : ''}`}
-                    onClick={() => onDMSelect({ ...conv, is_other_online: conv.is_other_online })}>
-                    <div className={`chat-list-avatar ${conv.is_other_online ? 'chat-list-avatar--online' : ''}`}>
-                      {conv.other_username?.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="chat-list-info">
-                      <div className="chat-list-row">
-                        <span className="chat-list-name">{conv.other_username}</span>
-                        {conv.last_message_at && (
-                          <span className="chat-list-time">{fmtLastMsg(conv.last_message_at)}</span>
+                {enrichedConvs.map(conv => {
+                  const unread = Number(conv.unread_count) || 0;
+                  return (
+                    <button key={conv.id}
+                      className={`chat-list-item ${activeDM?.id === conv.id ? 'chat-list-item--active' : ''}`}
+                      onClick={() => onDMSelect({ ...conv, is_other_online: conv.is_other_online })}>
+                      <div className={`chat-list-avatar ${conv.is_other_online ? 'chat-list-avatar--online' : ''}`}>
+                        {conv.other_username?.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="chat-list-info">
+                        <div className="chat-list-row">
+                          <span className={`chat-list-name ${unread > 0 ? 'chat-list-name--unread' : ''}`}>
+                            {conv.other_username}
+                          </span>
+                          <div className="chat-list-row-right">
+                            {conv.last_message_at && (
+                              <span className="chat-list-time">{fmtLastMsg(conv.last_message_at)}</span>
+                            )}
+                            {unread > 0 && (
+                              <span className="unread-badge">{unread > 99 ? '99+' : unread}</span>
+                            )}
+                          </div>
+                        </div>
+                        {conv.last_message && (
+                          <span className={`chat-list-preview ${unread > 0 ? 'chat-list-preview--unread' : ''}`}>
+                            {conv.last_message}
+                          </span>
                         )}
                       </div>
-                      {conv.last_message && (
-                        <span className="chat-list-preview">{conv.last_message}</span>
-                      )}
-                    </div>
-                  </button>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
             </>
           )}

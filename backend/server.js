@@ -378,15 +378,30 @@ app.post('/api/dm/conversations', authMiddleware, async (req, res) => {
   }
 });
 
-// GET /api/dm/conversations — list all my conversations
+// GET /api/dm/conversations — list all my conversations with unread counts
 app.get('/api/dm/conversations', authMiddleware, async (req, res) => {
   const myId = req.user.userId;
   try {
     const { rows } = await pool.query(
       `SELECT c.*,
               CASE WHEN c.user_a = $1 THEN ub.username ELSE ua.username END AS other_username,
-              CASE WHEN c.user_a = $1 THEN ub.id ELSE ua.id END AS other_user_id,
-              CASE WHEN c.user_a = $1 THEN ub.last_seen ELSE ua.last_seen END AS other_last_seen
+              CASE WHEN c.user_a = $1 THEN ub.id       ELSE ua.id       END AS other_user_id,
+              CASE WHEN c.user_a = $1 THEN ub.last_seen ELSE ua.last_seen END AS other_last_seen,
+              -- unread count: messages after my last_read_id
+              (
+                SELECT COUNT(*)
+                FROM dm_messages dm
+                WHERE dm.conv_id = c.id
+                  AND dm.sender_id != $1
+                  AND dm.deleted = FALSE
+                  AND dm.id > COALESCE(
+                    (SELECT last_read_id FROM dm_read_receipts
+                     WHERE conv_id = c.id AND user_id = $1), 0
+                  )
+              ) AS unread_count,
+              -- last message read_id (to power receipt ticks)
+              (SELECT last_read_id FROM dm_read_receipts
+               WHERE conv_id = c.id AND user_id != $1 LIMIT 1) AS other_last_read_id
        FROM conversations c
        JOIN users ua ON c.user_a = ua.id
        JOIN users ub ON c.user_b = ub.id
@@ -418,14 +433,18 @@ app.get('/api/dm/:convId/messages', authMiddleware, async (req, res) => {
     let query = `
       SELECT dm.*, u.username,
              rm.content AS reply_content, rm.message_type AS reply_message_type,
-             ru.username AS reply_username
+             ru.username AS reply_username,
+             COALESCE((
+               SELECT last_read_id FROM dm_read_receipts
+               WHERE conv_id = $1 AND user_id != $2 LIMIT 1
+             ), 0) AS other_last_read_id
       FROM dm_messages dm
       JOIN users u ON dm.sender_id = u.id
       LEFT JOIN dm_messages rm ON dm.reply_to_id = rm.id
       LEFT JOIN users ru ON rm.sender_id = ru.id
       WHERE dm.conv_id = $1 AND dm.deleted = FALSE
     `;
-    const params = [convId];
+    const params = [convId, myId];
 
     if (before_id) {
       params.push(before_id);
@@ -742,6 +761,44 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Mark DM messages as read — updates receipt, notifies sender
+  socket.on('mark_dm_read', async ({ convId, lastMessageId }) => {
+    const user = connectedUsers[socket.id];
+    if (!user?.userId || !convId || !lastMessageId) return;
+    try {
+      await pool.query(
+        `INSERT INTO dm_read_receipts (conv_id, user_id, last_read_id, read_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (conv_id, user_id)
+         DO UPDATE SET last_read_id = GREATEST(dm_read_receipts.last_read_id, EXCLUDED.last_read_id),
+                       read_at = NOW()`,
+        [convId, user.userId, lastMessageId]
+      );
+      // Notify everyone in the DM room so the sender's ticks turn blue
+      io.to(`dm_${convId}`).emit('dm_read', {
+        convId,
+        readerId: user.userId,
+        lastReadId: lastMessageId,
+      });
+    } catch (err) { console.error('Failed to mark DM read:', err); }
+  });
+
+  // Mark room messages as read
+  socket.on('mark_room_read', async ({ roomId, lastMessageId }) => {
+    const user = connectedUsers[socket.id];
+    if (!user?.userId || !roomId || !lastMessageId) return;
+    try {
+      await pool.query(
+        `INSERT INTO room_read_receipts (room_id, user_id, last_read_id, read_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (room_id, user_id)
+         DO UPDATE SET last_read_id = GREATEST(room_read_receipts.last_read_id, EXCLUDED.last_read_id),
+                       read_at = NOW()`,
+        [roomId, user.userId, lastMessageId]
+      );
+    } catch (err) { console.error('Failed to mark room read:', err); }
+  });
+
   // DM typing indicator
   socket.on('dm_typing', ({ convId, isTyping }) => {
     const user = connectedUsers[socket.id];
@@ -793,6 +850,14 @@ io.on('connection', (socket) => {
         'UPDATE conversations SET last_message = $1, last_message_at = NOW() WHERE id = $2',
         [content.trim().slice(0, 100), convId]
       );
+
+      // Attach the other user's last_read_id so sender can render correct tick state
+      const { rows: receipt } = await pool.query(
+        `SELECT last_read_id FROM dm_read_receipts
+         WHERE conv_id = $1 AND user_id != $2 LIMIT 1`,
+        [convId, user.userId]
+      );
+      msg.other_last_read_id = receipt[0]?.last_read_id || 0;
 
       io.to(`dm_${convId}`).emit('receive_dm', msg);
     } catch (err) {
