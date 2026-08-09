@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
-import socket, { BACKEND_URL } from '../socket';
+import socket, { BACKEND_URL } from '../../socket';
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
 

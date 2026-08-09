@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import axios from 'axios';
-import { BACKEND_URL } from '../socket';
+import { BACKEND_URL } from '../../socket';
 
 /**
  * SettingsPanel — lets users update their own username and/or password.

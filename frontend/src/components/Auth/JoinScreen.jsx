@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { BACKEND_URL } from '../socket';
+import { BACKEND_URL } from '../../socket';
 
 /**
  * JoinScreen — lamp toggle login effect with GSAP animation.

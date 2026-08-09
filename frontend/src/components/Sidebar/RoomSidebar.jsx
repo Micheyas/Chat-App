@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import socket, { BACKEND_URL } from '../socket';
+import socket, { BACKEND_URL } from '../../socket';
 
 function fmtSeen(ts) {
   if (!ts) return null;

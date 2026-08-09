@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import ReactionPicker from './ReactionPicker';
 
-export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, onReply, onReact, otherLastReadId, myUserId }) {
-  const [editing, setEditing] = useState(false);
+export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, onReply, otherLastReadId, myUserId }) {
+  const [editing,  setEditing]  = useState(false);
   const [editText, setEditText] = useState(msg.content);
   const inputRef = useRef(null);
 
@@ -28,21 +27,20 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, o
     if (e.key === 'Escape') { setEditing(false); setEditText(msg.content); }
   };
 
-  const [showReactionPicker, setShowReactionPicker] = useState(false);
   const canDelete = isOwn || isAdmin;
 
-  // Compute tick state outside JSX — no IIFE
+  // Tick state — computed before render, no IIFE
   const isDM   = otherLastReadId !== undefined;
   const isRead = isDM && msg.id && msg.id <= otherLastReadId;
 
-  // Admin sees soft-deleted messages with badge; regular users never get them from server
+  // Admin sees soft-deleted with badge; regular users never receive them
   if (msg.deleted && !isAdmin) return null;
 
   return (
     <div className={`message ${isOwn ? 'own-message' : 'other-message'}`}>
       <div className={`message-bubble${msg.deleted ? ' message-bubble--deleted' : ''}`}>
 
-        {/* Sender name for others */}
+        {/* Sender name */}
         {!isOwn && <span className="message-sender">{msg.username}</span>}
 
         {/* Reply preview */}
@@ -50,8 +48,8 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, o
           <div className="reply-preview">
             <span className="reply-preview-name">{msg.reply_to.reply_username}</span>
             <span className="reply-preview-text">
-              {msg.reply_to.message_type === 'image' ? '📷 Photo' :
-               msg.reply_to.message_type === 'document' ? '📎 File' :
+              {msg.reply_to.message_type === 'image'    ? '📷 Photo' :
+               msg.reply_to.message_type === 'document' ? '📎 File'  :
                msg.reply_to.content?.slice(0, 60)}
             </span>
           </div>
@@ -90,7 +88,10 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, o
         {!editing && (
           <div className="message-meta">
             <span className="message-time">{fmt(msg.created_at)}</span>
+
             {msg.deleted && <span className="deleted-badge">deleted</span>}
+
+            {/* Read receipts */}
             {isOwn && !msg.deleted && isDM && isRead && (
               <span className="message-status message-status--read" title="Read">
                 <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
@@ -106,7 +107,7 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, o
               </span>
             )}
 
-            {/* Reply button — any non-deleted text/image message */}
+            {/* Reply */}
             {!msg.deleted && (
               <button className="reply-msg-btn" onClick={() => onReply(msg)} title="Reply" aria-label="Reply">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -115,13 +116,8 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, o
                 </svg>
               </button>
             )}
-            {!msg.deleted && onReact && (
-              <button className="reaction-toggle-btn" onClick={() => setShowReactionPicker(prev => !prev)} title="React" aria-label="React">
-                😊
-              </button>
-            )}
 
-            {/* Edit — own text messages only */}
+            {/* Edit */}
             {isOwn && msg.message_type === 'text' && !msg.deleted && (
               <button className="edit-msg-btn" onClick={() => setEditing(true)} title="Edit" aria-label="Edit message">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -143,28 +139,6 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, o
               </button>
             )}
           </div>
-        )}
-
-        {/* Reactions display */}
-        {msg.reactions?.length > 0 && (
-          <div className="message-reactions">
-            {Object.entries(msg.reactions.reduce((acc, r) => {
-              acc[r.reaction] = (acc[r.reaction] || 0) + 1;
-              return acc;
-            }, {})).map(([emoji, count]) => (
-              <span key={emoji} className="reaction-badge">{emoji} {count}</span>
-            ))}
-          </div>
-        )}
-
-        {showReactionPicker && onReact && (
-          <ReactionPicker
-            messageId={msg.id}
-            existingReactions={msg.reactions}
-            onReact={onReact}
-            onClose={() => setShowReactionPicker(false)}
-            currentUserId={myUserId}
-          />
         )}
       </div>
     </div>

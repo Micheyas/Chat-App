@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { BACKEND_URL } from '../socket';
+import { BACKEND_URL } from '../../socket';
 
 const api = (token) => ({
   headers: { Authorization: `Bearer ${token}` },

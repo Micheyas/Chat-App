@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, lazy, Suspense } from 'react';
-import socket from '../socket';
+import socket from '../../socket';
 
 // Lazy-load emoji picker to avoid Rolldown initialization order bug
 const EmojiPicker = lazy(() => import('emoji-picker-react'));

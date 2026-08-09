@@ -1,15 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import socket, { BACKEND_URL } from './socket';
-import { useWebRTC } from './hooks/useWebRTC';
-import JoinScreen    from './components/JoinScreen';
-import RoomSidebar   from './components/RoomSidebar';
-import MessageList   from './components/MessageList';
-import MessageInput  from './components/MessageInput';
-import DMView        from './components/DMView';
-import VideoCall     from './components/VideoCall';
-import AdminPanel    from './components/AdminPanel';
-import SettingsPanel from './components/SettingsPanel';
+import JoinScreen    from './components/Auth/JoinScreen';
+import RoomSidebar   from './components/Sidebar/RoomSidebar';
+import MessageList   from './components/Chat/MessageList';
+import MessageInput  from './components/Chat/MessageInput';
+import DMView        from './components/Chat/DMView';
+import AdminPanel    from './components/Admin/AdminPanel';
+import SettingsPanel from './components/Admin/SettingsPanel';
 import './App.css';
 
 // ── Session helpers ────────────────────────────────────────────────────────
