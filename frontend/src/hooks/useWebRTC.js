@@ -80,7 +80,17 @@ export const useWebRTC = (socket, currentUser) => {
     };
 
     pc.ontrack = (event) => {
-      setRemoteStream(event.streams[0]);
+      if (event.streams && event.streams[0]) {
+        setRemoteStream(event.streams[0]);
+        return;
+      }
+
+      if (event.track) {
+        setRemoteStream((prevStream) => {
+          const tracks = prevStream ? [...prevStream.getTracks(), event.track] : [event.track];
+          return new MediaStream(tracks);
+        });
+      }
     };
 
     peerConnection.current = pc;
