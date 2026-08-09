@@ -395,6 +395,44 @@ body {
 .end-call-btn {
   background: #dc2626;
 }
+.call-mode-picker {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 12px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.03);
+}
+.call-mode-picker label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: #ddd;
+  cursor: pointer;
+}
+.call-mode-picker input {
+  accent-color: #ffb703;
+}
+.user-row-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.call-start-btn {
+  border: none;
+  background: #16a34a;
+  color: #fff;
+  font-size: 16px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.call-start-btn:hover {
+  background: #22c55e;
+}
 
 .incoming-call-banner {
   margin: 0 20px 14px;

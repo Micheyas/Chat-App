@@ -717,7 +717,7 @@ io.on('connection', (socket) => {
 
   // WebRTC signaling events
   socket.on('call-user', async (data) => {
-    const { calleeId, calleeUsername, callerName, offer } = data;
+    const { calleeId, calleeUsername, callerName, offer, mode = 'video' } = data;
     const caller = connectedUsers[socket.id];
     if (!caller || !offer) return;
 
@@ -736,6 +736,7 @@ io.on('connection', (socket) => {
         callerId: caller.userId,
         callerName: callerName || caller.username,
         offer,
+        mode,
         callerSocketId: socket.id,
       });
       return;
@@ -748,6 +749,7 @@ io.on('connection', (socket) => {
         callerId: caller.userId,
         callerName: callerName || caller.username,
         offer,
+        mode,
         timestamp: Date.now(),
       };
     }

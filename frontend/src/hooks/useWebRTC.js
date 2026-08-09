@@ -87,9 +87,9 @@ export const useWebRTC = (socket, currentUser) => {
     return pc;
   };
 
-  const startCall = async (userId, userName) => {
+  const startCall = async (userId, userName, mode = 'video') => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: mode === 'video', audio: true });
       setLocalStream(stream);
       const pc = createPeerConnection();
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -102,6 +102,7 @@ export const useWebRTC = (socket, currentUser) => {
         calleeId: userId,
         callerName: currentUser?.username || userName || 'Unknown',
         offer,
+        mode,
       });
       setIsInCall(true);
     } catch (error) {
@@ -116,8 +117,8 @@ export const useWebRTC = (socket, currentUser) => {
   const acceptCall = async () => {
     try {
       if (!incomingCall) return;
-      const { callerId, offer } = incomingCall;
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const { callerId, offer, mode = 'video' } = incomingCall;
+      const stream = await navigator.mediaDevices.getUserMedia({ video: mode === 'video', audio: true });
       setLocalStream(stream);
       const pc = createPeerConnection();
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));

@@ -193,9 +193,9 @@ export default function App() {
     reaction,
     action,
   });
-  const handleStartCall     = (targetUserId, targetUserName) => {
-    setCallTarget({ userId: targetUserId, username: targetUserName });
-    startCall(targetUserId, targetUserName);
+  const handleStartCall     = (targetUserId, targetUserName, mode = 'video') => {
+    setCallTarget({ userId: targetUserId, username: targetUserName, mode });
+    startCall(targetUserId, targetUserName, mode);
   };
 
   const handleFileUpload = async (e) => {

@@ -35,6 +35,7 @@ export default function RoomSidebar({
   const [conversations, setConversations] = useState([]);
   const [lastSeenMap,   setLastSeenMap]   = useState({});
   const [startingDM,    setStartingDM]    = useState(false);
+  const [callMode,      setCallMode]      = useState('video');
 
   // ── useCallback declarations FIRST — must come before any useEffect that uses them ──
 
@@ -307,6 +308,16 @@ export default function RoomSidebar({
             <input type="text" placeholder="Search users…" value={search}
               onChange={e => setSearch(e.target.value)} className="user-search-input" />
           </div>
+          <div className="call-mode-picker">
+            <label>
+              <input type="radio" name="callMode" value="video" checked={callMode === 'video'}
+                onChange={() => setCallMode('video')} /> Video
+            </label>
+            <label>
+              <input type="radio" name="callMode" value="audio" checked={callMode === 'audio'}
+                onChange={() => setCallMode('audio')} /> Audio
+            </label>
+          </div>
           <div className="users-list-vertical">
             {filteredUsers.map(uname => {
               const isOnline = onlineUsers.includes(uname);
@@ -331,7 +342,7 @@ export default function RoomSidebar({
                         </svg>
                       </button>
                       {onlineByUsername[uname] && onStartCall && (
-                        <button className="call-start-btn" onClick={() => onStartCall(onlineByUsername[uname].userId, uname)}
+                        <button className="call-start-btn" onClick={() => onStartCall(onlineByUsername[uname].userId, uname, callMode)}
                           title={`Call ${uname}`}>
                           📞
                         </button>
