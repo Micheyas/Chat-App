@@ -29,6 +29,10 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, o
 
   const canDelete = isOwn || isAdmin;
 
+  // Compute tick state outside JSX — no IIFE
+  const isDM   = otherLastReadId !== undefined;
+  const isRead = isDM && msg.id && msg.id <= otherLastReadId;
+
   // Admin sees soft-deleted messages with badge; regular users never get them from server
   if (msg.deleted && !isAdmin) return null;
 
@@ -85,37 +89,20 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, o
           <div className="message-meta">
             <span className="message-time">{fmt(msg.created_at)}</span>
             {msg.deleted && <span className="deleted-badge">deleted</span>}
-            {isOwn && !msg.deleted && (() => {
-              // Only show receipt ticks in DMs (when otherLastReadId is provided)
-              // In group rooms just show a single grey tick (sent)
-              const isRead = otherLastReadId && msg.id && msg.id <= otherLastReadId;
-              if (otherLastReadId !== undefined) {
-                // DM — grey single = sent, blue double = read
-                return isRead ? (
-                  <span className="message-status message-status--read" title="Read">
-                    {/* Double tick — blue */}
-                    <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-                      <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"/>
-                    </svg>
-                  </span>
-                ) : (
-                  <span className="message-status message-status--sent" title="Sent">
-                    {/* Single tick — grey */}
-                    <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
-                      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-                    </svg>
-                  </span>
-                );
-              }
-              // Group room — single grey tick
-              return (
-                <span className="message-status message-status--sent" title="Sent">
-                  <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
-                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-                  </svg>
-                </span>
-              );
-            })()}
+            {isOwn && !msg.deleted && isDM && isRead && (
+              <span className="message-status message-status--read" title="Read">
+                <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+                  <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"/>
+                </svg>
+              </span>
+            )}
+            {isOwn && !msg.deleted && (!isDM || !isRead) && (
+              <span className="message-status message-status--sent" title="Sent">
+                <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                  <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                </svg>
+              </span>
+            )}
 
             {/* Reply button — any non-deleted text/image message */}
             {!msg.deleted && (
