@@ -1,6 +1,8 @@
-import { useRef, useState, useEffect } from 'react';
-import EmojiPicker from 'emoji-picker-react';
+import { useRef, useState, useEffect, lazy, Suspense } from 'react';
 import socket from '../socket';
+
+// Lazy-load emoji picker to avoid Rolldown initialization order bug
+const EmojiPicker = lazy(() => import('emoji-picker-react'));
 
 /**
  * MessageInput — text input + file attachment + emoji picker + send button.
@@ -155,15 +157,17 @@ export default function MessageInput({ onSend, onFileUpload, uploading, roomId, 
           </button>
           {showEmoji && (
             <div className="emoji-picker-wrap">
-              <EmojiPicker
-                onEmojiClick={handleEmojiClick}
-                theme="dark"
-                height={380}
-                width={320}
-                searchDisabled={false}
-                skinTonesDisabled
-                previewConfig={{ showPreview: false }}
-              />
+              <Suspense fallback={<div style={{width:320,height:380,background:'#1a1a1a'}}/>}>
+                <EmojiPicker
+                  onEmojiClick={handleEmojiClick}
+                  theme="dark"
+                  height={380}
+                  width={320}
+                  searchDisabled={false}
+                  skinTonesDisabled
+                  previewConfig={{ showPreview: false }}
+                />
+              </Suspense>
             </div>
           )}
         </div>
