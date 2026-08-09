@@ -11,13 +11,22 @@ function fmtSeen(ts) {
   return new Date(ts).toLocaleDateString([], { day: '2-digit', month: 'short' });
 }
 
+function fmtLastMsg(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (d.toDateString() === new Date().toDateString()) {
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return d.toLocaleDateString([], { day: '2-digit', month: 'short' });
+}
+
 export default function RoomSidebar({
   rooms, activeRoom, onRoomSelect,
   activeDM, onDMSelect,
   onlineUsers, username, token, isAdmin, userId,
   onRoomCreated, onLogout, onShowAdmin, onShowSettings,
 }) {
-  const [tab,           setTab]       = useState('chats');   // 'chats' | 'users'
+  const [tab,           setTab]           = useState('chats');
   const [showNewRoom,   setShowNewRoom]   = useState(false);
   const [newRoomName,   setNewRoomName]   = useState('');
   const [creating,      setCreating]      = useState(false);
@@ -27,7 +36,48 @@ export default function RoomSidebar({
   const [lastSeenMap,   setLastSeenMap]   = useState({});
   const [startingDM,    setStartingDM]    = useState(false);
 
-  // Listen for new DMs to bump unread counts in real time
+  // ── useCallback declarations FIRST — must come before any useEffect that uses them ──
+
+  const fetchLastSeen = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${BACKEND_URL}/api/users/last-seen`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const map = {};
+      data.forEach(u => { map[u.username] = u.last_seen; });
+      setLastSeenMap(map);
+    } catch { /* silent */ }
+  }, [token]);
+
+  const fetchConversations = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${BACKEND_URL}/api/dm/conversations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setConversations(data);
+    } catch { /* silent */ }
+  }, [token]);
+
+  // ── useEffect hooks AFTER useCallback declarations ──────────────────────────
+
+  // Poll + reconnect refetch
+  useEffect(() => {
+    fetchLastSeen();
+    fetchConversations();
+    const i1 = setInterval(fetchLastSeen,     30000);
+    const i2 = setInterval(fetchConversations, 5000);
+
+    const onReconnect = () => fetchConversations();
+    socket.on('connect', onReconnect);
+
+    return () => {
+      clearInterval(i1);
+      clearInterval(i2);
+      socket.off('connect', onReconnect);
+    };
+  }, [fetchLastSeen, fetchConversations]);
+
+  // Socket DM events + focus/visibility refetch
   useEffect(() => {
     const onReceiveDM = (msg) => {
       setConversations(prev => prev.map(c => {
@@ -43,69 +93,30 @@ export default function RoomSidebar({
       }));
     };
 
-    // When WE mark a conv as read, clear the badge
     const onDmRead = ({ convId: cid, readerId }) => {
-      if (String(readerId) !== String(userId)) return; // only care about our own reads
+      if (String(readerId) !== String(userId)) return;
       setConversations(prev => prev.map(c =>
         String(c.id) === String(cid) ? { ...c, unread_count: 0 } : c
       ));
     };
 
+    const onFocus = () => fetchConversations();
+    const onVisibility = () => { if (!document.hidden) fetchConversations(); };
+
     socket.on('receive_dm', onReceiveDM);
     socket.on('dm_read',    onDmRead);
-
-    // Refetch from DB whenever window regains focus (catches offline-delivered messages)
-    const onFocus = () => fetchConversations();
     window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) fetchConversations();
-    });
+    document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       socket.off('receive_dm', onReceiveDM);
       socket.off('dm_read',    onDmRead);
       window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [userId, fetchConversations]);
 
-  // Fetch last-seen periodically
-  const fetchLastSeen = useCallback(async () => {
-    try {
-      const { data } = await axios.get(`${BACKEND_URL}/api/users/last-seen`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const map = {};
-      data.forEach(u => { map[u.username] = u.last_seen; });
-      setLastSeenMap(map);
-    } catch { /* silent */ }
-  }, [token]);
-
-  // Fetch DM conversations
-  const fetchConversations = useCallback(async () => {
-    try {
-      const { data } = await axios.get(`${BACKEND_URL}/api/dm/conversations`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setConversations(data);
-    } catch { /* silent */ }
-  }, [token]);
-
-  useEffect(() => {
-    fetchLastSeen();
-    fetchConversations();
-    const i1 = setInterval(fetchLastSeen,      30000);
-    const i2 = setInterval(fetchConversations,  5000); // fast poll — catches offline messages
-
-    // Refetch when socket reconnects (user came back online)
-    const onReconnect = () => fetchConversations();
-    socket.on('connect', onReconnect);
-
-    return () => {
-      clearInterval(i1);
-      clearInterval(i2);
-      socket.off('connect', onReconnect);
-    };
-  }, [fetchLastSeen, fetchConversations]);
+  // ── Handlers ──────────────────────────────────────────────────────────────
 
   const handleCreateRoom = async (e) => {
     e.preventDefault();
@@ -133,12 +144,10 @@ export default function RoomSidebar({
         { targetUsername },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      // Add online status
       data.is_other_online = onlineUsers.includes(data.other_username);
       setConversations(prev => {
         const exists = prev.find(c => c.id === data.id);
-        if (exists) return prev;
-        return [data, ...prev];
+        return exists ? prev : [data, ...prev];
       });
       onDMSelect(data);
       setTab('chats');
@@ -148,27 +157,19 @@ export default function RoomSidebar({
     } finally { setStartingDM(false); }
   };
 
-  // Enrich conversations with online status
+  // ── Derived values ─────────────────────────────────────────────────────────
+
   const enrichedConvs = conversations.map(c => ({
     ...c,
     is_other_online: onlineUsers.includes(c.other_username),
   }));
 
-  // User list for search (exclude self)
-  const allUsers = Object.keys(lastSeenMap).filter(u => u !== username);
+  const allUsers     = Object.keys(lastSeenMap).filter(u => u !== username);
   const filteredUsers = search.trim()
     ? allUsers.filter(u => u.toLowerCase().includes(search.toLowerCase()))
     : allUsers;
 
-  const fmtLastMsg = (ts) => {
-    if (!ts) return '';
-    const d = new Date(ts);
-    const now = new Date();
-    if (d.toDateString() === now.toDateString()) {
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-    return d.toLocaleDateString([], { day: '2-digit', month: 'short' });
-  };
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="sidebar">
@@ -216,7 +217,6 @@ export default function RoomSidebar({
       {/* ── CHATS TAB ── */}
       {tab === 'chats' && (
         <div className="sidebar-content">
-          {/* Rooms */}
           <div className="sidebar-section-header">
             <p className="sidebar-section-title">Rooms</p>
             {isAdmin && (
@@ -255,7 +255,6 @@ export default function RoomSidebar({
             ))}
           </div>
 
-          {/* DM Conversations */}
           {enrichedConvs.length > 0 && (
             <>
               <div className="sidebar-section-header" style={{ marginTop: 12 }}>
@@ -267,7 +266,7 @@ export default function RoomSidebar({
                   return (
                     <button key={conv.id}
                       className={`chat-list-item ${activeDM?.id === conv.id ? 'chat-list-item--active' : ''}`}
-                      onClick={() => onDMSelect({ ...conv, is_other_online: conv.is_other_online })}>
+                      onClick={() => onDMSelect({ ...conv })}>
                       <div className={`chat-list-avatar ${conv.is_other_online ? 'chat-list-avatar--online' : ''}`}>
                         {conv.other_username?.charAt(0).toUpperCase()}
                       </div>
@@ -304,19 +303,13 @@ export default function RoomSidebar({
       {tab === 'users' && (
         <div className="sidebar-content">
           <div className="user-search-wrap">
-            <input
-              type="text"
-              placeholder="Search users…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="user-search-input"
-            />
+            <input type="text" placeholder="Search users…" value={search}
+              onChange={e => setSearch(e.target.value)} className="user-search-input" />
           </div>
           <div className="users-list-vertical">
             {filteredUsers.map(uname => {
-              const isOnline   = onlineUsers.includes(uname);
-              const lastSeen   = lastSeenMap[uname];
-              const seenText   = fmtSeen(lastSeen);
+              const isOnline = onlineUsers.includes(uname);
+              const seenText = fmtSeen(lastSeenMap[uname]);
               return (
                 <div key={uname} className="user-row">
                   <div className={`user-row-avatar ${isOnline ? 'user-row-avatar--online' : ''}`}>
@@ -329,12 +322,8 @@ export default function RoomSidebar({
                     </span>
                   </div>
                   {uname !== username && (
-                    <button
-                      className="dm-start-btn"
-                      onClick={() => handleStartDM(uname)}
-                      disabled={startingDM}
-                      title={`Message ${uname}`}
-                    >
+                    <button className="dm-start-btn" onClick={() => handleStartDM(uname)}
+                      disabled={startingDM} title={`Message ${uname}`}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                       </svg>
