@@ -2097,3 +2097,273 @@ body {
   color: #ccc;
   font-weight: 500;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CALL UI
+═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Call overlay ─────────────────────────────────────────────────────────── */
+.call-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.call-overlay--connected {
+  background: #000;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+/* ── Ringing / Calling modal ─────────────────────────────────────────────── */
+.call-modal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 48px 40px;
+  background: #1a1a1a;
+  border-radius: 24px;
+  border: 1px solid #2b2b2b;
+  min-width: 300px;
+  box-shadow: 0 24px 64px rgba(0,0,0,.6);
+}
+
+.call-avatar-ring {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.call-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0088cc, #005f8f);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 700;
+  color: #fff;
+  z-index: 1;
+  position: relative;
+}
+
+.call-avatar--large {
+  width: 120px;
+  height: 120px;
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+/* Pulsing ring animation */
+.call-ring-pulse {
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+  border: 3px solid #0088cc;
+  opacity: 0;
+  animation: ring-pulse 2s ease-out infinite;
+}
+.call-ring-pulse--delay { animation-delay: 1s; }
+
+@keyframes ring-pulse {
+  0%   { transform: scale(0.8); opacity: 0.8; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+
+.call-name {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.call-subtitle {
+  font-size: 14px;
+  color: #888;
+}
+
+.call-error {
+  font-size: 13px;
+  color: #f87171;
+  text-align: center;
+}
+
+/* ── Action buttons (accept / reject) ────────────────────────────────────── */
+.call-actions {
+  display: flex;
+  gap: 32px;
+  margin-top: 8px;
+}
+
+.call-btn {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform .15s, filter .15s;
+}
+.call-btn:hover { transform: scale(1.08); }
+.call-btn svg   { width: 26px; height: 26px; }
+
+.call-btn--accept { background: #22c55e; color: #fff; }
+.call-btn--reject { background: #ef4444; color: #fff; }
+.call-btn--end    { background: #ef4444; color: #fff; }
+.call-btn--large  { width: 72px; height: 72px; }
+.call-btn--large svg { width: 32px; height: 32px; }
+
+/* ── Connected: video layout ─────────────────────────────────────────────── */
+.call-remote-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.call-local-video {
+  position: absolute;
+  bottom: 100px;
+  right: 16px;
+  width: 120px;
+  height: 90px;
+  border-radius: 12px;
+  object-fit: cover;
+  border: 2px solid rgba(255,255,255,.3);
+  z-index: 10;
+  transition: opacity .2s;
+}
+.call-local-video--hidden { opacity: 0; }
+
+/* ── Audio call background ───────────────────────────────────────────────── */
+.call-audio-bg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0a1628, #0d2137);
+}
+.call-audio-name {
+  font-size: 26px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 8px;
+}
+.call-audio-status {
+  font-size: 14px;
+  color: #4ade80;
+}
+
+/* ── Top bar (connected) ─────────────────────────────────────────────────── */
+.call-top-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: linear-gradient(to bottom, rgba(0,0,0,.6), transparent);
+  z-index: 10;
+}
+.call-top-name   { font-size: 18px; font-weight: 700; color: #fff; }
+.call-top-status { font-size: 12px; color: #4ade80; }
+
+/* ── Controls bar (connected) ────────────────────────────────────────────── */
+.call-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 24px 0 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  background: linear-gradient(to top, rgba(0,0,0,.7), transparent);
+  z-index: 10;
+}
+
+.call-ctrl-btn {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.3);
+  background: rgba(255,255,255,.1);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s, transform .15s;
+  backdrop-filter: blur(8px);
+}
+.call-ctrl-btn svg   { width: 22px; height: 22px; }
+.call-ctrl-btn:hover { background: rgba(255,255,255,.2); transform: scale(1.05); }
+.call-ctrl-btn--active {
+  background: rgba(255,255,255,.85);
+  color: #000;
+  border-color: transparent;
+}
+
+/* ── Call buttons in DM header ───────────────────────────────────────────── */
+.dm-call-btns {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.call-header-btn {
+  background: none;
+  border: none;
+  color: #0088cc;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  transition: background .15s;
+}
+.call-header-btn svg    { width: 20px; height: 20px; }
+.call-header-btn:hover  { background: rgba(0,136,204,.15); }
+
+.call-header-status {
+  margin-left: auto;
+  font-size: 13px;
+  color: #4ade80;
+  flex-shrink: 0;
+  padding: 0 4px;
+}
+
+/* ── Error toast ─────────────────────────────────────────────────────────── */
+.call-toast {
+  background: #1a1a1a;
+  border: 1px solid #f87171;
+  color: #f87171;
+  font-size: 13px;
+  padding: 8px 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ── Mobile ──────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .call-local-video { width: 90px; height: 68px; bottom: 120px; }
+  .call-modal       { padding: 36px 24px; min-width: unset; width: 90vw; }
+}
