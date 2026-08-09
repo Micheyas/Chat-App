@@ -23,8 +23,8 @@ function fmtLastMsg(ts) {
 export default function RoomSidebar({
   rooms, activeRoom, onRoomSelect,
   activeDM, onDMSelect,
-  onlineUsers, username, token, isAdmin, userId,
-  onRoomCreated, onLogout, onShowAdmin, onShowSettings,
+  onlineUsers, onlineUsersData, username, token, isAdmin, userId,
+  onRoomCreated, onLogout, onShowAdmin, onShowSettings, onStartCall,
 }) {
   const [tab,           setTab]           = useState('chats');
   const [showNewRoom,   setShowNewRoom]   = useState(false);
@@ -164,6 +164,7 @@ export default function RoomSidebar({
     is_other_online: onlineUsers.includes(c.other_username),
   }));
 
+  const onlineByUsername = Object.fromEntries((onlineUsersData || []).map(user => [user.username, user]));
   const allUsers     = Object.keys(lastSeenMap).filter(u => u !== username);
   const filteredUsers = search.trim()
     ? allUsers.filter(u => u.toLowerCase().includes(search.toLowerCase()))
@@ -322,12 +323,20 @@ export default function RoomSidebar({
                     </span>
                   </div>
                   {uname !== username && (
-                    <button className="dm-start-btn" onClick={() => handleStartDM(uname)}
-                      disabled={startingDM} title={`Message ${uname}`}>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                      </svg>
-                    </button>
+                    <div className="user-row-actions">
+                      <button className="dm-start-btn" onClick={() => handleStartDM(uname)}
+                        disabled={startingDM} title={`Message ${uname}`}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                        </svg>
+                      </button>
+                      {onlineByUsername[uname] && onStartCall && (
+                        <button className="call-start-btn" onClick={() => onStartCall(onlineByUsername[uname].userId, uname)}
+                          title={`Call ${uname}`}>
+                          📞
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               );

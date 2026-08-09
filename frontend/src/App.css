@@ -333,6 +333,157 @@ body {
   gap: 12px;
 }
 
+/* ─── Video Call UI ─────────────────────────────────────────────────────── */
+.video-call-container {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  width: min(420px, calc(100vw - 32px));
+  max-height: 520px;
+  background: rgba(14, 14, 14, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  z-index: 30;
+}
+.video-call-container .remote-video-wrapper,
+.video-call-container .local-video-wrapper {
+  position: relative;
+  overflow: hidden;
+}
+.remote-video-wrapper {
+  width: 100%;
+  height: 240px;
+  background: #111;
+}
+.remote-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.local-video-wrapper {
+  width: 100%;
+  height: 180px;
+  margin-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.local-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.call-controls {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  justify-content: flex-end;
+  background: rgba(15, 15, 15, 0.92);
+}
+.control-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: none;
+  border-radius: 999px;
+  background: #222;
+  color: #fff;
+  cursor: pointer;
+}
+.end-call-btn {
+  background: #dc2626;
+}
+
+.incoming-call-banner {
+  margin: 0 20px 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.incoming-call-actions {
+  display: flex;
+  gap: 10px;
+}
+.accept-call-btn,
+.reject-call-btn {
+  border: none;
+  padding: 10px 14px;
+  border-radius: 12px;
+  cursor: pointer;
+  color: #fff;
+}
+.accept-call-btn { background: #16a34a; }
+.reject-call-btn { background: #dc2626; }
+
+/* ─── Reaction Picker ───────────────────────────────────────────────────── */
+.reaction-picker {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 10px;
+  padding: 14px;
+  background: rgba(18, 18, 18, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.4);
+  z-index: 40;
+}
+.reactions-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(40px, 1fr));
+  gap: 10px;
+}
+.reaction-btn {
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  border-radius: 14px;
+  padding: 8px;
+  cursor: pointer;
+  position: relative;
+  font-size: 18px;
+}
+.reaction-btn.active {
+  background: #ffb703;
+  color: #000;
+}
+.reaction-count {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  font-size: 11px;
+  color: #fff;
+}
+.message-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+.reaction-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 14px;
+}
+.reaction-toggle-btn {
+  border: none;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font-size: 18px;
+}
+
 .username-input {
   width: 100%;
   padding: 14px 16px;

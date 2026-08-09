@@ -524,7 +524,12 @@ app.get('/api/messages', authMiddleware, async (req, res) => {
              u.username,
              rm.content    AS reply_content,
              rm.message_type AS reply_message_type,
-             ru.username   AS reply_username
+             ru.username   AS reply_username,
+             COALESCE(
+               (SELECT json_agg(json_build_object('user_id', mr.user_id, 'reaction', mr.reaction))
+                FROM message_reactions mr
+                WHERE mr.message_id = m.id), '[]'
+             ) AS reactions
       FROM messages m
       JOIN users u ON m.sender_id = u.id
       LEFT JOIN messages rm ON m.reply_to_id = rm.id
@@ -597,8 +602,56 @@ const io = new Server(server, {
   }
 });
 
-// Map socketId → { username, userId }
+// Map socketId → { username, userId, socketId, isAdmin, inCall }
 const connectedUsers = {};
+const callRequests = {};
+const VALID_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '😡', '🎉', '👏', '🔥', '💯'];
+
+function broadcastOnlineUsers() {
+  const payload = Object.values(connectedUsers).map(user => ({
+    userId: user.userId,
+    username: user.username,
+    isAdmin: user.isAdmin,
+  }));
+  io.emit('online-users', payload);
+  io.emit('users-list', payload.map(u => u.username));
+}
+
+function findSocketByUserId(userId) {
+  for (const [socketId, user] of Object.entries(connectedUsers)) {
+    if (user.userId === userId) {
+      return { socketId, ...user };
+    }
+  }
+  return null;
+}
+
+function findSocketByUsername(username) {
+  if (!username) return null;
+  for (const [socketId, user] of Object.entries(connectedUsers)) {
+    if (user.username === username) {
+      return { socketId, ...user };
+    }
+  }
+  return null;
+}
+
+async function findUserIdByUsername(username) {
+  if (!username) return null;
+  try {
+    const { rows } = await pool.query(
+      'SELECT id FROM users WHERE username = $1 AND approved = TRUE LIMIT 1',
+      [username]
+    );
+    return rows[0]?.id || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function findSocketById(socketId) {
+  return connectedUsers[socketId] ? { socketId, ...connectedUsers[socketId] } : null;
+}
 
 io.on('connection', (socket) => {
   console.log(`Socket connected: ${socket.id}`);
@@ -626,7 +679,13 @@ io.on('connection', (socket) => {
       return;
     }
 
-    connectedUsers[socket.id] = { username, userId, isAdmin };
+    connectedUsers[socket.id] = {
+      username,
+      userId,
+      isAdmin,
+      socketId: socket.id,
+      inCall: false,
+    };
 
     // Update last_seen to NULL (meaning online now) when user connects
     if (userId) {
@@ -638,8 +697,13 @@ io.on('connection', (socket) => {
 
     console.log(`${username} joined`);
 
-    io.emit('users-list', Object.values(connectedUsers).map(u => u.username));
+    broadcastOnlineUsers();
     socket.broadcast.emit('user-joined', username);
+
+    if (userId && callRequests[userId]) {
+      socket.emit('incoming-call', callRequests[userId]);
+      delete callRequests[userId];
+    }
   });
 
   // Join a specific room
@@ -649,6 +713,98 @@ io.on('connection', (socket) => {
       if (r !== socket.id) socket.leave(r);
     });
     socket.join(roomId);
+  });
+
+  // WebRTC signaling events
+  socket.on('call-user', async (data) => {
+    const { calleeId, calleeUsername, callerName, offer } = data;
+    const caller = connectedUsers[socket.id];
+    if (!caller || !offer) return;
+
+    let callee = calleeId ? findSocketByUserId(calleeId) : null;
+    if (!callee && calleeUsername) {
+      callee = findSocketByUsername(calleeUsername);
+    }
+
+    if (callee) {
+      if (callee.inCall) {
+        socket.emit('call-busy', { message: `${callee.username} is on another call` });
+        return;
+      }
+
+      io.to(callee.socketId).emit('incoming-call', {
+        callerId: caller.userId,
+        callerName: callerName || caller.username,
+        offer,
+        callerSocketId: socket.id,
+      });
+      return;
+    }
+
+    // Save pending call request for offline recipients if we know the userId
+    const targetId = calleeId || (calleeUsername ? await findUserIdByUsername(calleeUsername) : null);
+    if (targetId) {
+      callRequests[targetId] = {
+        callerId: caller.userId,
+        callerName: callerName || caller.username,
+        offer,
+        timestamp: Date.now(),
+      };
+    }
+  });
+
+  socket.on('accept-call', (data) => {
+    const { callerId, answer } = data;
+    const caller = findSocketByUserId(callerId);
+    if (!caller || !answer) return;
+
+    const callee = connectedUsers[socket.id];
+    if (!callee) return;
+
+    connectedUsers[socket.id].inCall = true;
+    if (connectedUsers[caller.socketId]) connectedUsers[caller.socketId].inCall = true;
+
+    io.to(caller.socketId).emit('call-accepted', {
+      answer,
+      calleeSocketId: socket.id,
+    });
+  });
+
+  socket.on('reject-call', (data) => {
+    const { callerId } = data;
+    const caller = findSocketByUserId(callerId);
+    if (!caller) return;
+
+    io.to(caller.socketId).emit('call-rejected', {
+      message: 'Call rejected',
+    });
+  });
+
+  socket.on('send-ice-candidate', (data) => {
+    const { targetId, candidate } = data;
+    const target = findSocketByUserId(targetId) || findSocketById(targetId);
+    if (!target || !candidate) return;
+
+    io.to(target.socketId).emit('receive-ice-candidate', {
+      candidate,
+      fromId: connectedUsers[socket.id]?.userId,
+    });
+  });
+
+  socket.on('end-call', (data) => {
+    const { targetId } = data;
+    const target = findSocketByUserId(targetId) || findSocketById(targetId);
+    if (target) {
+      if (connectedUsers[target.socketId]) {
+        connectedUsers[target.socketId].inCall = false;
+      }
+      io.to(target.socketId).emit('call-ended', {
+        message: 'Call ended by other party',
+      });
+    }
+    if (connectedUsers[socket.id]) {
+      connectedUsers[socket.id].inCall = false;
+    }
   });
 
   // Send a message
@@ -680,7 +836,7 @@ io.on('connection', (socket) => {
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
         [room_id, senderId, content, message_type, reply_to_id || null]
       );
-      const msg = { ...rows[0], username: user.username };
+      const msg = { ...rows[0], username: user.username, reactions: [], edited: false, deleted: false };
 
       // If reply, attach the original message snippet
       if (reply_to_id) {
@@ -733,10 +889,13 @@ io.on('connection', (socket) => {
 
     try {
       const { rows } = await pool.query(
-        'SELECT sender_id FROM messages WHERE id = $1', [messageId]
+        'SELECT sender_id, created_at FROM messages WHERE id = $1', [messageId]
       );
       if (rows.length === 0) return;
       if (rows[0].sender_id !== user.userId) return;
+
+      const elapsed = Date.now() - new Date(rows[0].created_at).getTime();
+      if (elapsed > 5 * 60 * 1000) return;
 
       const { rows: updated } = await pool.query(
         `UPDATE messages SET content = $1, edited = TRUE WHERE id = $2 RETURNING *`,
@@ -759,6 +918,39 @@ io.on('connection', (socket) => {
       username: user.username,
       isTyping
     });
+  });
+
+  socket.on('message_reaction', async ({ messageId, room_id, reaction, action }) => {
+    const user = connectedUsers[socket.id];
+    if (!user || !user.userId || !messageId || !reaction) return;
+    if (!VALID_REACTIONS.includes(reaction)) return;
+
+    try {
+      if (action === 'remove') {
+        await pool.query(
+          'DELETE FROM message_reactions WHERE message_id = $1 AND user_id = $2 AND reaction = $3',
+          [messageId, user.userId, reaction]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO message_reactions (message_id, user_id, reaction)
+           VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+          [messageId, user.userId, reaction]
+        );
+      }
+
+      const { rows: reactions } = await pool.query(
+        'SELECT user_id, reaction FROM message_reactions WHERE message_id = $1',
+        [messageId]
+      );
+
+      io.to(room_id || 'general').emit('message_reactions_updated', {
+        messageId,
+        reactions,
+      });
+    } catch (err) {
+      console.error('Failed to handle message reaction:', err);
+    }
   });
 
   // Mark DM messages as read — updates receipt, notifies sender

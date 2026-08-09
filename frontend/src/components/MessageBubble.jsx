@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
+import ReactionPicker from './ReactionPicker';
 
-export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, onReply, otherLastReadId, myUserId }) {
+export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, onReply, onReact, otherLastReadId, myUserId }) {
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(msg.content);
   const inputRef = useRef(null);
@@ -27,6 +28,7 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, o
     if (e.key === 'Escape') { setEditing(false); setEditText(msg.content); }
   };
 
+  const [showReactionPicker, setShowReactionPicker] = useState(false);
   const canDelete = isOwn || isAdmin;
 
   // Compute tick state outside JSX — no IIFE
@@ -113,6 +115,11 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, o
                 </svg>
               </button>
             )}
+            {!msg.deleted && onReact && (
+              <button className="reaction-toggle-btn" onClick={() => setShowReactionPicker(prev => !prev)} title="React" aria-label="React">
+                😊
+              </button>
+            )}
 
             {/* Edit — own text messages only */}
             {isOwn && msg.message_type === 'text' && !msg.deleted && (
@@ -136,6 +143,28 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, o
               </button>
             )}
           </div>
+        )}
+
+        {/* Reactions display */}
+        {msg.reactions?.length > 0 && (
+          <div className="message-reactions">
+            {Object.entries(msg.reactions.reduce((acc, r) => {
+              acc[r.reaction] = (acc[r.reaction] || 0) + 1;
+              return acc;
+            }, {})).map(([emoji, count]) => (
+              <span key={emoji} className="reaction-badge">{emoji} {count}</span>
+            ))}
+          </div>
+        )}
+
+        {showReactionPicker && onReact && (
+          <ReactionPicker
+            messageId={msg.id}
+            existingReactions={msg.reactions}
+            onReact={onReact}
+            onClose={() => setShowReactionPicker(false)}
+            currentUserId={myUserId}
+          />
         )}
       </div>
     </div>

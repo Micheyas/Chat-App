@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import socket, { BACKEND_URL } from './socket';
+import { useWebRTC } from './hooks/useWebRTC';
 import JoinScreen    from './components/JoinScreen';
 import RoomSidebar   from './components/RoomSidebar';
 import MessageList   from './components/MessageList';
 import MessageInput  from './components/MessageInput';
 import DMView        from './components/DMView';
+import VideoCall     from './components/VideoCall';
 import AdminPanel    from './components/AdminPanel';
 import SettingsPanel from './components/SettingsPanel';
 import './App.css';
@@ -27,6 +29,8 @@ export default function App() {
   // Active DM (null = viewing a room)
   const [activeDM, setActiveDM] = useState(null);
 
+  const [callTarget, setCallTarget] = useState(null);
+
   // Room messages
   const [messages,    setMessages]    = useState([]);
   const [hasMore,     setHasMore]     = useState(true);
@@ -40,7 +44,7 @@ export default function App() {
 
   // Online users list (usernames)
   const [onlineUsers, setOnlineUsers] = useState([]);
-
+  const [onlineUserObjects, setOnlineUserObjects] = useState([]);
   // Typing (room)
   const [typingUsers, setTypingUsers] = useState([]);
 
@@ -48,6 +52,17 @@ export default function App() {
   const [sidebarOpen,   setSidebarOpen]   = useState(false);
   const [showAdmin,     setShowAdmin]     = useState(false);
   const [showSettings,  setShowSettings]  = useState(false);
+
+  const {
+    startCall,
+    acceptCall,
+    rejectCall,
+    endCall,
+    incomingCall,
+    isInCall,
+    localStream,
+    remoteStream,
+  } = useWebRTC(socket, auth || {});
 
   // ── Restore session ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -67,30 +82,36 @@ export default function App() {
     const onReceive   = (msg) => setMessages(prev => [...prev, msg]);
     const onDeleted   = (id)  => setMessages(prev => prev.filter(m => m.id !== id));
     const onEdited    = (msg) => setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, content: msg.content, edited: true } : m));
+    const onReacted   = ({ messageId, reactions }) => setMessages(prev => prev.map(m => m.id === messageId ? { ...m, reactions } : m));
     const onJoined    = (u)   => setOnlineUsers(prev => prev.includes(u) ? prev : [...prev, u]);
     const onLeft      = (u)   => setOnlineUsers(prev => prev.filter(x => x !== u));
     const onList      = (l)   => setOnlineUsers(l);
+    const onOnline    = (list) => setOnlineUserObjects(Array.isArray(list) ? list : []);
     const onTyping    = ({ username: u, isTyping }) =>
       setTypingUsers(prev => isTyping ? (prev.includes(u) ? prev : [...prev, u]) : prev.filter(x => x !== u));
 
     socket.on('receive_message', onReceive);
     socket.on('message_deleted', onDeleted);
     socket.on('message_edited',  onEdited);
+    socket.on('message_reactions_updated', onReacted);
     socket.on('user-joined',     onJoined);
     socket.on('user-left',       onLeft);
     socket.on('users-list',      onList);
+    socket.on('online-users',    onOnline);
     socket.on('user-typing',     onTyping);
 
     return () => {
       socket.off('receive_message', onReceive);
       socket.off('message_deleted', onDeleted);
       socket.off('message_edited',  onEdited);
+      socket.off('message_reactions_updated', onReacted);
       socket.off('user-joined',     onJoined);
       socket.off('user-left',       onLeft);
       socket.off('users-list',      onList);
+      socket.off('online-users',    onOnline);
       socket.off('user-typing',     onTyping);
     };
-  }, []);
+  }, [isInCall]);
 
   // ── Fetch rooms ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -166,6 +187,16 @@ export default function App() {
   const handleDeleteMessage = (id) => socket.emit('delete_message', { messageId: id, room_id: String(activeRoom.id) });
   const handleEditMessage   = (id, content) => socket.emit('edit_message', { messageId: id, content, room_id: String(activeRoom.id) });
   const handleReplyMessage  = (msg) => setReplyTo(msg);
+  const handleReactMessage  = (messageId, reaction, action) => socket.emit('message_reaction', {
+    messageId,
+    room_id: String(activeRoom.id),
+    reaction,
+    action,
+  });
+  const handleStartCall     = (targetUserId, targetUserName) => {
+    setCallTarget({ userId: targetUserId, username: targetUserName });
+    startCall(targetUserId, targetUserName);
+  };
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
@@ -202,6 +233,7 @@ export default function App() {
           activeDM={activeDM}
           onDMSelect={handleDMSelect}
           onlineUsers={onlineUsers}
+          onlineUsersData={onlineUserObjects}
           username={auth.username}
           userId={auth.userId}
           token={auth.token}
@@ -210,6 +242,7 @@ export default function App() {
           onLogout={handleLogout}
           onShowAdmin={() => setShowAdmin(true)}
           onShowSettings={() => setShowSettings(true)}
+          onStartCall={handleStartCall}
         />
       </div>
 
@@ -246,6 +279,16 @@ export default function App() {
 
           {activeRoom ? (
             <>
+              {incomingCall && !isInCall && (
+                <div className="incoming-call-banner">
+                  <span>{incomingCall.callerName} is calling...</span>
+                  <div className="incoming-call-actions">
+                    <button onClick={acceptCall} className="accept-call-btn">Accept</button>
+                    <button onClick={rejectCall} className="reject-call-btn">Reject</button>
+                  </div>
+                </div>
+              )}
+
               <MessageList
                 messages={messages}
                 username={auth.username}
@@ -256,7 +299,9 @@ export default function App() {
                 onDeleteMessage={handleDeleteMessage}
                 onEditMessage={handleEditMessage}
                 onReplyMessage={handleReplyMessage}
+                onReactMessage={handleReactMessage}
                 typingUsers={typingUsers}
+                myUserId={auth.userId}
               />
               <MessageInput
                 onSend={handleSend}
@@ -265,6 +310,15 @@ export default function App() {
                 roomId={String(activeRoom.id)}
                 replyTo={replyTo}
                 onCancelReply={() => setReplyTo(null)}
+              />
+              <VideoCall
+                localStream={localStream}
+                remoteStream={remoteStream}
+                isInCall={isInCall}
+                onEndCall={() => {
+                  endCall();
+                  setCallTarget(null);
+                }}
               />
             </>
           ) : (
