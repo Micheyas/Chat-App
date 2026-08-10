@@ -29,6 +29,7 @@ export function useWebRTC(auth) {
 
   const pcRef          = useRef(null);   // RTCPeerConnection
   const localStreamRef = useRef(null);   // kept in sync with state for closures
+  const pendingIceRef  = useRef([]);     // ICE candidates received before remote SDP
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,7 @@ export function useWebRTC(auth) {
     setIsMuted(false);
     setIsCamOff(false);
     setCallError('');
+    pendingIceRef.current = [];
   }, []);
 
   const endCall = useCallback((targetId) => {
@@ -59,6 +61,21 @@ export function useWebRTC(auth) {
     cleanup();
     setCallState('idle');
   }, [cleanup]);
+
+  const flushPendingIceCandidates = useCallback(async () => {
+    if (!pcRef.current || !pcRef.current.remoteDescription) return;
+
+    const candidates = pendingIceRef.current;
+    pendingIceRef.current = [];
+
+    for (const candidate of candidates) {
+      try {
+        await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        console.error('Failed to add queued ICE candidate:', err);
+      }
+    }
+  }, []);
 
   const createPC = useCallback((targetId) => {
     const pc = new RTCPeerConnection(ICE_SERVERS);
@@ -139,6 +156,7 @@ export function useWebRTC(auth) {
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
       await pc.setRemoteDescription(new RTCSessionDescription(remoteInfo.offer));
+      await flushPendingIceCandidates();
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
@@ -149,9 +167,13 @@ export function useWebRTC(auth) {
       setCallError(err.name === 'NotAllowedError'
         ? 'Camera/microphone permission denied.'
         : 'Failed to accept call.');
-      rejectCall();
+      if (remoteInfo?.callerId) {
+        socket.emit('reject-call', { callerId: remoteInfo.callerId });
+      }
+      cleanup();
+      setCallState('idle');
     }
-  }, [remoteInfo, callMode, getLocalStream, createPC]);
+  }, [remoteInfo, callMode, getLocalStream, createPC, flushPendingIceCandidates, cleanup]);
 
   // ── Reject incoming call ────────────────────────────────────────────────────
 
@@ -197,6 +219,7 @@ export function useWebRTC(auth) {
       try {
         if (!pcRef.current) return;
         await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+        await flushPendingIceCandidates();
         setCallState('connected');
         // store callee socket id for ice candidates
         if (remoteInfo) setRemoteInfo(prev => ({ ...prev, calleeSocketId }));
@@ -230,9 +253,15 @@ export function useWebRTC(auth) {
     const onIce = async ({ candidate }) => {
       try {
         if (pcRef.current && candidate) {
+          if (!pcRef.current.remoteDescription) {
+            pendingIceRef.current.push(candidate);
+            return;
+          }
           await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
         }
-      } catch (err) { /* may arrive before remote desc — safe to ignore */ }
+      } catch {
+        // ICE can become stale if the call ends while candidates are still arriving.
+      }
     };
 
     socket.on('incoming-call',        onIncoming);
@@ -250,7 +279,7 @@ export function useWebRTC(auth) {
       socket.off('call-busy',            onBusy);
       socket.off('receive-ice-candidate', onIce);
     };
-  }, [cleanup, remoteInfo]);
+  }, [cleanup, remoteInfo, flushPendingIceCandidates]);
 
   // Cleanup on unmount
   useEffect(() => () => cleanup(), [cleanup]);

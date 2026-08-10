@@ -12,10 +12,11 @@ export default function CallUI({
   localStream, remoteStream,
   isMuted, isCamOff, callError,
   onAccept, onReject, onEnd,
-  onToggleMute, onToggleCamera, onSwitchToAudio,
+  onToggleMute, onToggleCamera,
 }) {
   const localVideoRef  = useRef(null);
   const remoteVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
 
   // Attach streams to video elements
   useEffect(() => {
@@ -27,6 +28,9 @@ export default function CallUI({
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
+    }
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream;
     }
   }, [remoteStream]);
 
@@ -93,14 +97,26 @@ export default function CallUI({
     const isVideo = callMode === 'video';
     return (
       <div className="call-overlay call-overlay--connected">
+        {/* Remote audio for voice calls */}
+        {!isVideo && remoteStream && (
+          <audio ref={remoteAudioRef} autoPlay playsInline />
+        )}
+
         {/* Remote video (full screen) */}
         {isVideo ? (
-          <video
-            ref={remoteVideoRef}
-            className="call-remote-video"
-            autoPlay
-            playsInline
-          />
+          <div className="call-remote-video-wrap">
+            <video
+              ref={remoteVideoRef}
+              className="call-remote-video"
+              autoPlay
+              playsInline
+            />
+            {!remoteStream && (
+              <div className="call-waiting-media">
+                Waiting for video…
+              </div>
+            )}
+          </div>
         ) : (
           <div className="call-audio-bg">
             <div className="call-avatar call-avatar--large">
