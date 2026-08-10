@@ -510,6 +510,21 @@ app.post('/api/rooms', authMiddleware, async (req, res) => {
   }
 });
 
+// DELETE /api/rooms/:id — admin only, deletes room and all its messages
+app.delete('/api/rooms/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  try {
+    // Delete all messages in this room first
+    await pool.query('DELETE FROM messages WHERE room_id = $1', [String(id)]);
+    const { rows } = await pool.query('DELETE FROM rooms WHERE id = $1 RETURNING name', [id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Room not found' });
+    res.json({ success: true, name: rows[0].name });
+  } catch (err) {
+    console.error('Failed to delete room:', err);
+    res.status(500).json({ error: 'Failed to delete room' });
+  }
+});
+
 // ─── MESSAGES ROUTES ──────────────────────────────────────────────────────────
 
 // GET /api/messages — paginated history for a room

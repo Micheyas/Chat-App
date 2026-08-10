@@ -24,7 +24,7 @@ export default function RoomSidebar({
   rooms, activeRoom, onRoomSelect,
   activeDM, onDMSelect,
   onlineUsers, onlineUsersData, username, token, isAdmin, userId,
-  onRoomCreated, onLogout, onShowAdmin, onShowSettings, onStartCall,
+  onRoomCreated, onDeleteRoom, onLogout, onShowAdmin, onShowSettings, onStartCall,
 }) {
   const [tab,           setTab]           = useState('chats');
   const [showNewRoom,   setShowNewRoom]   = useState(false);
@@ -244,16 +244,32 @@ export default function RoomSidebar({
 
           <div className="chat-list">
             {rooms.map(room => (
-              <button key={room.id}
-                className={`chat-list-item ${activeRoom?.id === room.id && !activeDM ? 'chat-list-item--active' : ''}`}
-                onClick={() => onRoomSelect(room)}>
-                <div className="chat-list-avatar chat-list-avatar--room">
-                  {room.name.charAt(0).toUpperCase()}
-                </div>
-                <div className="chat-list-info">
-                  <span className="chat-list-name"># {room.name}</span>
-                </div>
-              </button>
+              <div key={room.id} className={`chat-list-item-wrap ${activeRoom?.id === room.id && !activeDM ? 'chat-list-item-wrap--active' : ''}`}>
+                <button
+                  className={`chat-list-item chat-list-item--room ${activeRoom?.id === room.id && !activeDM ? 'chat-list-item--active' : ''}`}
+                  onClick={() => onRoomSelect(room)}>
+                  <div className="chat-list-avatar chat-list-avatar--room">
+                    {room.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="chat-list-info">
+                    <span className="chat-list-name"># {room.name}</span>
+                  </div>
+                </button>
+                {isAdmin && (
+                  <button
+                    className="room-delete-btn"
+                    onClick={() => onDeleteRoom(room)}
+                    title={`Delete #${room.name}`}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="3 6 5 6 21 6"/>
+                      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                      <path d="M10 11v6M14 11v6"/>
+                      <path d="M9 6V4h6v2"/>
+                    </svg>
+                  </button>
+                )}
+              </div>
             ))}
           </div>
 

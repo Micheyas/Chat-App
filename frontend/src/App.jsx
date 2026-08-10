@@ -158,6 +158,25 @@ export default function App() {
   };
   const handleRoomCreated = (room) => { setRooms(prev => [...prev, room]); handleRoomSelect(room); };
 
+  const handleDeleteRoom = async (room) => {
+    if (!confirm(`Delete room "#${room.name}" and all its messages? This cannot be undone.`)) return;
+    try {
+      await axios.delete(`${BACKEND_URL}/api/rooms/${room.id}`, {
+        headers: { Authorization: `Bearer ${auth.token}` },
+      });
+      setRooms(prev => prev.filter(r => r.id !== room.id));
+      // If we were viewing the deleted room, switch to the first available
+      if (activeRoom?.id === room.id) {
+        setActiveRoom(prev => {
+          const remaining = rooms.filter(r => r.id !== room.id);
+          return remaining.length > 0 ? remaining[0] : null;
+        });
+      }
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to delete room');
+    }
+  };
+
   // ── DM handlers ───────────────────────────────────────────────────────────
   const handleDMSelect = (conv) => {
     setActiveDM(conv);
@@ -224,6 +243,7 @@ export default function App() {
           token={auth.token}
           isAdmin={auth.isAdmin}
           onRoomCreated={handleRoomCreated}
+          onDeleteRoom={handleDeleteRoom}
           onLogout={handleLogout}
           onShowAdmin={() => setShowAdmin(true)}
           onShowSettings={() => setShowSettings(true)}
