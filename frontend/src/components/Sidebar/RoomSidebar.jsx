@@ -23,7 +23,7 @@ function fmtLastMsg(ts) {
 export default function RoomSidebar({
   rooms, activeRoom, onRoomSelect,
   activeDM, onDMSelect,
-  onlineUsers, onlineUsersData, username, token, isAdmin, userId,
+  onlineUsers, onlineUsersData, username, token, isAdmin, userId, roomUnread = {},
   onRoomCreated, onDeleteRoom, onLogout, onShowAdmin, onShowSettings, onStartCall,
 }) {
   const [tab,           setTab]           = useState('chats');
@@ -83,7 +83,7 @@ export default function RoomSidebar({
     const onReceiveDM = (msg) => {
       setConversations(prev => prev.map(c => {
         if (String(c.id) !== String(msg.conv_id)) return c;
-        const currentlyOpen = window.__activeDMId && String(window.__activeDMId) === String(c.id);
+        const currentlyOpen = activeDM && String(activeDM.id) === String(c.id);
         if (currentlyOpen) return { ...c, last_message: msg.content, last_message_at: msg.created_at };
         return {
           ...c,
@@ -115,7 +115,7 @@ export default function RoomSidebar({
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [userId, fetchConversations]);
+  }, [userId, fetchConversations, activeDM]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -252,7 +252,12 @@ export default function RoomSidebar({
                     {room.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="chat-list-info">
-                    <span className="chat-list-name"># {room.name}</span>
+                    <div className="chat-list-row">
+                      <span className="chat-list-name"># {room.name}</span>
+                      {Number(roomUnread[String(room.id)]) > 0 && (
+                        <span className="unread-badge">{roomUnread[String(room.id)] > 99 ? '99+' : roomUnread[String(room.id)]}</span>
+                      )}
+                    </div>
                   </div>
                 </button>
                 {isAdmin && (

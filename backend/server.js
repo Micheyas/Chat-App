@@ -8,14 +8,79 @@ const pool = require('./db');
 
 require('dotenv').config();
 
-const app = express();
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET === 'changeme_use_env_var' || JWT_SECRET === 'replace_with_a_long_random_secret_string') {
+  console.error('JWT_SECRET is missing or still set to the example value. Set a long random secret in backend/.env');
+  process.exit(1);
+}
 
-// ─── CORS ────────────────────────────────────────────────────────────────────
-// Always open — no env var dependency. Any origin is allowed.
+const MAX_MESSAGE_LENGTH = 8000;
+const DEFAULT_ORIGINS = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'https://localhost',
+  'http://localhost',
+  'capacitor://localhost',
+];
+const extraOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const allowedOrigins = [...new Set([...DEFAULT_ORIGINS, ...extraOrigins])];
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  return allowedOrigins.includes(origin);
+}
+
+const authAttempts = new Map();
+function allowAuthAttempt(ip) {
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000;
+  const rec = authAttempts.get(ip);
+  if (!rec || now - rec.start > windowMs) {
+    authAttempts.set(ip, { count: 1, start: now });
+    return true;
+  }
+  rec.count += 1;
+  return rec.count <= 20;
+}
+
+// Keep the local limiter bounded. For multi-instance deployments set REDIS_URL
+// and place a shared rate limiter in front of the service (see DEPLOYMENT.md).
+const authAttemptCleanup = setInterval(() => {
+  const cutoff = Date.now() - (15 * 60 * 1000);
+  for (const [ip, record] of authAttempts) {
+    if (record.start < cutoff) authAttempts.delete(ip);
+  }
+}, 15 * 60 * 1000);
+authAttemptCleanup.unref();
+
+function parseLimit(raw, fallback = 30) {
+  const n = parseInt(raw, 10);
+  if (Number.isNaN(n)) return fallback;
+  return Math.min(Math.max(n, 1), 100);
+}
+
+const app = express();
+app.set('trust proxy', 1);
+
+// Minimal security headers without adding another production dependency.
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=()');
+  next();
+});
+
 const corsOptions = {
-  origin: true,           // reflect the request origin, allow all
+  origin(origin, callback) {
+    if (isAllowedOrigin(origin)) return callback(null, true);
+    callback(null, false);
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
@@ -24,9 +89,7 @@ app.use(cors(corsOptions));
 // Handle preflight for every route (Express 5 compatible — no wildcard string)
 app.options(/.*/, cors(corsOptions));
 
-app.use(express.json());
-
-const JWT_SECRET = process.env.JWT_SECRET || 'changeme_use_env_var';
+app.use(express.json({ limit: '1mb' }));
 
 // ─── AUTH MIDDLEWARE ──────────────────────────────────────────────────────────
 function authMiddleware(req, res, next) {
@@ -54,19 +117,33 @@ function adminMiddleware(req, res, next) {
 // ─── HEALTH CHECK ─────────────────────────────────────────────────────────────
 app.get('/', (_req, res) => res.send('Chat App Backend is running'));
 
+// Used by hosting providers to distinguish a running process from a usable app.
+app.get('/health', async (_req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.status(200).json({ status: 'ok', database: 'connected' });
+  } catch (err) {
+    console.error('Health check failed:', err.message);
+    res.status(503).json({ status: 'unavailable', database: 'disconnected' });
+  }
+});
+
 // ─── AUTH ROUTES ──────────────────────────────────────────────────────────────
 
 // POST /api/register — unique username enforced
 app.post('/api/register', async (req, res) => {
+  if (!allowAuthAttempt(req.ip)) {
+    return res.status(429).json({ error: 'Too many attempts. Try again later.' });
+  }
   const { username, password } = req.body;
   if (!username?.trim() || !password?.trim()) {
     return res.status(400).json({ error: 'Username and password are required' });
   }
-  if (username.trim().length < 2) {
-    return res.status(400).json({ error: 'Username must be at least 2 characters' });
+  if (!/^[a-zA-Z0-9_.-]{2,50}$/.test(username.trim())) {
+    return res.status(400).json({ error: 'Username must be 2-50 characters and use only letters, numbers, dots, dashes, or underscores' });
   }
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  if (password.length < 10) {
+    return res.status(400).json({ error: 'Password must be at least 10 characters' });
   }
 
   try {
@@ -94,6 +171,9 @@ app.post('/api/register', async (req, res) => {
 
 // POST /api/login
 app.post('/api/login', async (req, res) => {
+  if (!allowAuthAttempt(req.ip)) {
+    return res.status(429).json({ error: 'Too many attempts. Try again later.' });
+  }
   const { username, password } = req.body;
   if (!username?.trim() || !password?.trim()) {
     return res.status(400).json({ error: 'Username and password are required' });
@@ -224,7 +304,7 @@ app.patch('/api/me', authMiddleware, async (req, res) => {
       }
     }
     if (password?.trim()) {
-      if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      if (password.length < 10) return res.status(400).json({ error: 'Password must be at least 10 characters' });
       const hash = await bcrypt.hash(password, 12);
       await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, userId]);
     }
@@ -245,6 +325,98 @@ app.patch('/api/me', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Failed to update profile:', err);
     res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// ─── PROFILE ─────────────────────────────────────────────────────────────────
+
+app.get('/api/me/profile', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, username, avatar_url, bio, updated_at FROM users WHERE id = $1',
+      [req.user.userId]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Profile lookup failed:', err);
+    res.status(500).json({ error: 'Could not load profile' });
+  }
+});
+
+app.patch('/api/me/profile', authMiddleware, async (req, res) => {
+  const avatarUrl = req.body.avatarUrl === undefined ? undefined : String(req.body.avatarUrl).trim();
+  const bio = req.body.bio === undefined ? undefined : String(req.body.bio).trim();
+  if (avatarUrl === undefined && bio === undefined) return res.status(400).json({ error: 'Provide an avatar or bio' });
+  if (avatarUrl && !/^https:\/\//i.test(avatarUrl)) return res.status(400).json({ error: 'Avatar URL must use HTTPS' });
+  if (avatarUrl && avatarUrl.length > 2000) return res.status(400).json({ error: 'Avatar URL is too long' });
+  if (bio && bio.length > 280) return res.status(400).json({ error: 'Bio must be at most 280 characters' });
+
+  try {
+    const { rows } = await pool.query(
+      `UPDATE users
+       SET avatar_url = COALESCE($1, avatar_url), bio = COALESCE($2, bio), updated_at = NOW()
+       WHERE id = $3
+       RETURNING id, username, avatar_url, bio, updated_at`,
+      [avatarUrl, bio, req.user.userId]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Profile update failed:', err);
+    res.status(500).json({ error: 'Could not update profile' });
+  }
+});
+
+// ─── DISCOVERY & UNREAD COUNTS ───────────────────────────────────────────────
+
+// Search only returns messages the signed-in user is allowed to see: room posts
+// for now. Results are intentionally capped to prevent expensive broad queries.
+app.get('/api/search', authMiddleware, async (req, res) => {
+  const query = String(req.query.q || '').trim();
+  const roomId = String(req.query.roomId || '').trim();
+  if (query.length < 2) return res.status(400).json({ error: 'Search query must be at least 2 characters' });
+  if (query.length > 100) return res.status(400).json({ error: 'Search query is too long' });
+
+  try {
+    const params = [`%${query}%`];
+    let roomClause = '';
+    if (roomId) {
+      params.push(roomId);
+      roomClause = `AND m.room_id = $${params.length}`;
+    }
+    const { rows } = await pool.query(
+      `SELECT m.id, m.room_id, m.content, m.message_type, m.created_at, u.id AS sender_id, u.username
+       FROM messages m
+       JOIN users u ON u.id = m.sender_id
+       WHERE m.deleted = FALSE AND m.content ILIKE $1 ${roomClause}
+       ORDER BY m.created_at DESC
+       LIMIT 50`,
+      params
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Message search failed:', err);
+    res.status(500).json({ error: 'Search failed' });
+  }
+});
+
+app.get('/api/rooms/unread', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT r.id, COUNT(m.id)::int AS unread_count
+       FROM rooms r
+       LEFT JOIN room_read_receipts rr ON rr.room_id = r.id::text AND rr.user_id = $1
+       LEFT JOIN messages m ON m.room_id = r.id::text
+         AND m.deleted = FALSE
+         AND m.sender_id <> $1
+         AND m.id > COALESCE(rr.last_read_id, 0)
+       GROUP BY r.id
+       ORDER BY r.id`,
+      [req.user.userId]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Unread count lookup failed:', err);
+    res.status(500).json({ error: 'Could not load unread counts' });
   }
 });
 
@@ -419,7 +591,8 @@ app.get('/api/dm/conversations', authMiddleware, async (req, res) => {
 // GET /api/dm/:convId/messages — paginated DM messages
 app.get('/api/dm/:convId/messages', authMiddleware, async (req, res) => {
   const { convId } = req.params;
-  const { limit = 30, before_id } = req.query;
+  const { before_id } = req.query;
+  const limit = parseLimit(req.query.limit);
   const myId = req.user.userId;
 
   try {
@@ -530,7 +703,8 @@ app.delete('/api/rooms/:id', authMiddleware, adminMiddleware, async (req, res) =
 // GET /api/messages — paginated history for a room
 // Admin sees all messages including soft-deleted; regular users only see non-deleted
 app.get('/api/messages', authMiddleware, async (req, res) => {
-  const { room_id = 'general', limit = 30, before_id } = req.query;
+  const { room_id = 'general', before_id } = req.query;
+  const limit = parseLimit(req.query.limit);
   const isAdmin = req.user.isAdmin || false;
 
   try {
@@ -598,7 +772,7 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
     if (rows[0].sender_id !== req.user.userId) {
       return res.status(403).json({ error: 'Cannot delete someone else\'s message' });
     }
-    await pool.query('DELETE FROM messages WHERE id = $1', [id]);
+    await pool.query('UPDATE messages SET deleted = TRUE WHERE id = $1', [id]);
     res.json({ success: true });
   } catch (err) {
     console.error('Failed to delete message:', err);
@@ -611,9 +785,23 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: true,
+    origin(origin, callback) {
+      if (isAllowedOrigin(origin)) return callback(null, true);
+      callback(null, false);
+    },
     methods: ['GET', 'POST'],
     credentials: true
+  }
+});
+
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) return next(new Error('Authentication required'));
+  try {
+    socket.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    next(new Error('Invalid or expired token'));
   }
 });
 
@@ -622,12 +810,29 @@ const connectedUsers = {};
 const callRequests = {};
 const VALID_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '😡', '🎉', '👏', '🔥', '💯'];
 
+function requireSocketUser(socket) {
+  const user = connectedUsers[socket.id];
+  if (!user?.userId) return null;
+  return user;
+}
+
+function isUserStillConnected(userId) {
+  if (!userId) return false;
+  return Object.values(connectedUsers).some((u) => u.userId === userId);
+}
+
 function broadcastOnlineUsers() {
-  const payload = Object.values(connectedUsers).map(user => ({
-    userId: user.userId,
-    username: user.username,
-    isAdmin: user.isAdmin,
-  }));
+  const seen = new Set();
+  const payload = [];
+  for (const user of Object.values(connectedUsers)) {
+    if (!user.userId || seen.has(user.userId)) continue;
+    seen.add(user.userId);
+    payload.push({
+      userId: user.userId,
+      username: user.username,
+      isAdmin: user.isAdmin,
+    });
+  }
   io.emit('online-users', payload);
   io.emit('users-list', payload.map(u => u.username));
 }
@@ -671,26 +876,25 @@ function findSocketById(socketId) {
 io.on('connection', (socket) => {
   console.log(`Socket connected: ${socket.id}`);
 
-  // Join chat — expects { token } for authenticated users
-  socket.on('join', async ({ token, username: guestName } = {}) => {
-    let username = guestName;
-    let userId = null;
-    let isAdmin = false;
-
-    // Validate JWT if provided
+  // Join chat — JWT is required (handshake + this event)
+  socket.on('join', async ({ token } = {}) => {
+    let decoded = socket.user;
     if (token) {
       try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        username = decoded.username;
-        userId = decoded.userId;
-        isAdmin = decoded.isAdmin || false;
+        decoded = jwt.verify(token, JWT_SECRET);
+        socket.user = decoded;
       } catch {
-        // bad token — ignore, fall through to guest
+        socket.emit('error', 'Invalid or expired token');
+        return;
       }
     }
 
-    if (!username) {
-      socket.emit('error', 'Username is required');
+    const username = decoded?.username;
+    const userId = decoded?.userId;
+    const isAdmin = decoded?.isAdmin || false;
+
+    if (!username || !userId) {
+      socket.emit('error', 'Authentication required');
       return;
     }
 
@@ -702,12 +906,8 @@ io.on('connection', (socket) => {
       inCall: false,
     };
 
-    // Update last_seen to NULL (meaning online now) when user connects
-    if (userId) {
-      pool.query('UPDATE users SET last_seen = NULL WHERE id = $1', [userId]).catch(() => {});
-    }
+    pool.query('UPDATE users SET last_seen = NULL WHERE id = $1', [userId]).catch(() => {});
 
-    // Join the default room
     socket.join('general');
 
     console.log(`${username} joined`);
@@ -723,11 +923,12 @@ io.on('connection', (socket) => {
 
   // Join a specific room
   socket.on('join-room', (roomId) => {
-    // Leave all rooms except the socket's own room
+    if (!requireSocketUser(socket)) return;
+    if (roomId == null || String(roomId).length > 100) return;
     socket.rooms.forEach(r => {
       if (r !== socket.id) socket.leave(r);
     });
-    socket.join(roomId);
+    socket.join(String(roomId));
   });
 
   // WebRTC signaling events
@@ -827,31 +1028,16 @@ io.on('connection', (socket) => {
   // Send a message
   socket.on('send_message', async (data) => {
     const { room_id = 'general', content, message_type = 'text', reply_to_id } = data;
-    const user = connectedUsers[socket.id];
-
+    const user = requireSocketUser(socket);
     if (!user) return;
-
-    // Guest users without a userId get a new row for storage
-    let senderId = user.userId;
-    if (!senderId) {
-      try {
-        const r = await pool.query(
-          `INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id`,
-          [user.username, `${user.username}_${Date.now()}@chat.local`]
-        );
-        senderId = r.rows[0].id;
-        connectedUsers[socket.id].userId = senderId;
-      } catch (err) {
-        console.error('Failed to insert guest user:', err);
-        return;
-      }
-    }
+    if (typeof content !== 'string' || !content.trim()) return;
+    if (content.length > MAX_MESSAGE_LENGTH) return;
 
     try {
       const { rows } = await pool.query(
         `INSERT INTO messages (room_id, sender_id, content, message_type, reply_to_id)
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [room_id, senderId, content, message_type, reply_to_id || null]
+        [room_id, user.userId, content.trim(), message_type, reply_to_id || null]
       );
       const msg = { ...rows[0], username: user.username, reactions: [], edited: false, deleted: false };
 
@@ -1028,7 +1214,8 @@ io.on('connection', (socket) => {
   // Send a DM message
   socket.on('send_dm', async ({ convId, content, message_type = 'text', reply_to_id }) => {
     const user = connectedUsers[socket.id];
-    if (!user?.userId || !content?.trim()) return;
+    if (!user?.userId || typeof content !== 'string' || !content.trim()) return;
+    if (content.length > MAX_MESSAGE_LENGTH) return;
 
     try {
       // Verify user belongs to conversation
@@ -1103,22 +1290,23 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     const user = connectedUsers[socket.id];
-    if (user) {
-      console.log(`${user.username} disconnected`);
+    if (!user) return;
 
-      // Save last_seen timestamp when user goes offline
-      if (user.userId) {
-        pool.query('UPDATE users SET last_seen = NOW() WHERE id = $1', [user.userId]).catch(() => {});
-      }
+    console.log(`${user.username} disconnected`);
+    delete connectedUsers[socket.id];
 
-      delete connectedUsers[socket.id];
+    if (user.userId && !isUserStillConnected(user.userId)) {
+      pool.query('UPDATE users SET last_seen = NOW() WHERE id = $1', [user.userId]).catch(() => {});
       io.emit('user-left', user.username);
-      io.emit('users-list', Object.values(connectedUsers).map(u => u.username));
     }
+    broadcastOnlineUsers();
   });
 });
 
 const PORT = process.env.PORT || 5000;
+pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITH TIME ZONE')
+  .catch((err) => console.error('Failed to ensure last_seen column:', err.message));
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
 });

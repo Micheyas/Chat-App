@@ -47,6 +47,9 @@ async function migrate() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_dm_message_reactions_message ON dm_message_reactions(dm_message_id)`);
     console.log('✓ dm_message_reactions table');
 
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP WITH TIME ZONE`);
+    console.log('✓ users.last_seen');
+
     console.log('\n✅ v4 migration completed.');
   } catch (err) {
     console.error('❌ Migration failed:', err.message);

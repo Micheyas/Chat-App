@@ -30,8 +30,8 @@ Open the app at `http://localhost:5173`.
 Copy `backend/.env.example` to `backend/.env` and set:
 
 - `DATABASE_URL` for PostgreSQL
-- `JWT_SECRET`
-- `ALLOWED_ORIGINS`
+- `JWT_SECRET` — required. The backend will not start without a real secret.
+- `ALLOWED_ORIGINS` — your production frontend URL. Localhost and Capacitor origins are allowed by default.
 - `CLOUDINARY_CLOUD_NAME`
 - `CLOUDINARY_UPLOAD_PRESET`
 

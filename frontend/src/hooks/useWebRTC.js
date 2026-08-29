@@ -1,11 +1,21 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import socket from '../socket';
 
-// Public STUN servers — free, no config needed
+const TURN_URLS = import.meta.env.VITE_TURN_URLS
+  ? import.meta.env.VITE_TURN_URLS.split(',').map(url => url.trim()).filter(Boolean)
+  : [];
+
 const ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    ...(TURN_URLS.length > 0
+      ? [{
+          urls: TURN_URLS,
+          username: import.meta.env.VITE_TURN_USERNAME,
+          credential: import.meta.env.VITE_TURN_CREDENTIAL,
+        }]
+      : []),
   ],
 };
 

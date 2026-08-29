@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
-import socket, { BACKEND_URL } from './socket';
+import { useState, useEffect } from 'react';
+import { useAuth } from './hooks/useAuth';
+import { useSocket } from './hooks/useSocket';
+import { useChat } from './hooks/useChat';
+import api from './services/api';
 import JoinScreen    from './components/Auth/JoinScreen';
 import RoomSidebar   from './components/Sidebar/RoomSidebar';
 import MessageList   from './components/Chat/MessageList';
@@ -10,150 +12,110 @@ import AdminPanel    from './components/Admin/AdminPanel';
 import SettingsPanel from './components/Admin/SettingsPanel';
 import './App.css';
 
-// ── Session helpers ────────────────────────────────────────────────────────
-const SESSION_KEY = 'chat_session';
-const saveSession  = (d) => localStorage.setItem(SESSION_KEY, JSON.stringify(d));
-const loadSession  = () => { try { return JSON.parse(localStorage.getItem(SESSION_KEY)); } catch { return null; } };
-const clearSession = () => localStorage.removeItem(SESSION_KEY);
-
 export default function App() {
-  // Auth
-  const [auth, setAuth] = useState(null);
+  const { auth, login, logout, updateAuth } = useAuth();
+  const socket = useSocket();
 
-  // Rooms
   const [rooms,      setRooms]      = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
-
-  // Active DM (null = viewing a room)
-  const [activeDM, setActiveDM] = useState(null);
-
-  // Room messages
-  const [messages,    setMessages]    = useState([]);
-  const [hasMore,     setHasMore]     = useState(true);
-  const [loadingMsgs, setLoadingMsgs] = useState(false);
-
-  // Reply state for room chat
-  const [replyTo, setReplyTo] = useState(null);
-
-  // File upload
-  const [uploading, setUploading] = useState(false);
-
-  // Online users list (usernames)
+  const [activeDM,   setActiveDM]   = useState(null);
+  const [uploading,  setUploading]  = useState(false);
   const [onlineUsers, setOnlineUsers] = useState([]);
-
-  // Typing (room)
-  const [typingUsers, setTypingUsers] = useState([]);
-
-  // UI
   const [sidebarOpen,  setSidebarOpen]  = useState(false);
   const [showAdmin,    setShowAdmin]    = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [roomUnread,   setRoomUnread]   = useState({});
+  const [isOnline,     setIsOnline]     = useState(navigator.onLine);
 
-  // ── Restore session ──────────────────────────────────────────────────────
-  useEffect(() => {
-    const s = loadSession();
-    if (s?.token && s?.username) setAuth(s);
-  }, []);
+  const {
+    messages, hasMore, loading, typingUsers,
+    replyTo, setReplyTo,
+    loadMessages, sendMessage, deleteMessage, editMessage, sendFile,
+  } = useChat(auth, activeRoom);
 
-  // ── Connect socket ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!auth) return;
+    socket.auth = { token: auth.token };
+    const join = () => socket.emit('join', { token: auth.token });
     if (!socket.connected) socket.connect();
-    socket.emit('join', { token: auth.token, username: auth.username });
-  }, [auth]);
+    else join();
+    socket.on('connect', join);
+    return () => socket.off('connect', join);
+  }, [auth, socket]);
 
-  // ── Socket listeners ─────────────────────────────────────────────────────
   useEffect(() => {
-    const onReceive = (msg) => setMessages(prev => [...prev, msg]);
-    const onDeleted = (id)  => setMessages(prev => prev.filter(m => m.id !== id));
-    const onEdited  = (msg) => setMessages(prev =>
-      prev.map(m => m.id === msg.id ? { ...m, content: msg.content, edited: true } : m)
-    );
-    const onReacted = ({ messageId, reactions }) => setMessages(prev =>
-      prev.map(m => m.id === messageId ? { ...m, reactions } : m)
-    );
-    const onJoined  = (u) => setOnlineUsers(prev => prev.includes(u) ? prev : [...prev, u]);
-    const onLeft    = (u) => setOnlineUsers(prev => prev.filter(x => x !== u));
-    const onList    = (l) => setOnlineUsers(Array.isArray(l) ? l.map(x => typeof x === 'string' ? x : x.username) : []);
-    const onTyping  = ({ username: u, isTyping }) =>
-      setTypingUsers(prev => isTyping
-        ? (prev.includes(u) ? prev : [...prev, u])
-        : prev.filter(x => x !== u)
-      );
+    const onJoined = (u) => setOnlineUsers(prev => prev.includes(u) ? prev : [...prev, u]);
+    const onLeft   = (u) => setOnlineUsers(prev => prev.filter(x => x !== u));
+    const onList   = (l) => setOnlineUsers(Array.isArray(l) ? l.map(x => typeof x === 'string' ? x : x.username) : []);
 
-    socket.on('receive_message',            onReceive);
-    socket.on('message_deleted',            onDeleted);
-    socket.on('message_edited',             onEdited);
-    socket.on('message_reactions_updated',  onReacted);
-    socket.on('user-joined',                onJoined);
-    socket.on('user-left',                  onLeft);
-    socket.on('users-list',                 onList);
-    socket.on('online-users',               onList);
-    socket.on('user-typing',                onTyping);
+    socket.on('user-joined',  onJoined);
+    socket.on('user-left',    onLeft);
+    socket.on('users-list',   onList);
+    socket.on('online-users', onList);
 
     return () => {
-      socket.off('receive_message',           onReceive);
-      socket.off('message_deleted',           onDeleted);
-      socket.off('message_edited',            onEdited);
-      socket.off('message_reactions_updated', onReacted);
-      socket.off('user-joined',               onJoined);
-      socket.off('user-left',                 onLeft);
-      socket.off('users-list',                onList);
-      socket.off('online-users',              onList);
-      socket.off('user-typing',               onTyping);
+      socket.off('user-joined',  onJoined);
+      socket.off('user-left',    onLeft);
+      socket.off('users-list',   onList);
+      socket.off('online-users', onList);
     };
-  }, []);
+  }, [socket]);
 
-  // ── Fetch rooms ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!auth) return;
-    axios
-      .get(`${BACKEND_URL}/api/rooms`, { headers: { Authorization: `Bearer ${auth.token}` } })
+    api
+      .get('/api/rooms')
       .then(({ data }) => { setRooms(data); if (data.length > 0) setActiveRoom(data[0]); })
       .catch(console.error);
   }, [auth]);
 
-  // ── Load room messages ───────────────────────────────────────────────────
-  const loadMessages = useCallback(async (beforeId = null) => {
-    if (!auth || !activeRoom || loadingMsgs) return;
-    setLoadingMsgs(true);
-    try {
-      const params = { room_id: String(activeRoom.id), limit: 30 };
-      if (beforeId) params.before_id = beforeId;
-      const { data } = await axios.get(`${BACKEND_URL}/api/messages`, {
-        params, headers: { Authorization: `Bearer ${auth.token}` },
-      });
-      if (data.length < 30) setHasMore(false); else setHasMore(true);
-      setMessages(prev => beforeId ? [...data, ...prev] : data);
-    } catch (err) { console.error('Failed to load messages:', err); }
-    finally { setLoadingMsgs(false); }
-  }, [auth, activeRoom, loadingMsgs]);
+  useEffect(() => {
+    if (!auth) return;
+    const loadUnread = async () => {
+      try {
+        const { data } = await api.get('/api/rooms/unread');
+        setRoomUnread(Object.fromEntries(data.map(row => [String(row.id), Number(row.unread_count) || 0])));
+      } catch { /* The chat remains usable if unread counts cannot load. */ }
+    };
+    loadUnread();
+    const interval = setInterval(loadUnread, 15000);
+    return () => clearInterval(interval);
+  }, [auth]);
 
   useEffect(() => {
-    if (!activeRoom) return;
-    setMessages([]); setHasMore(true); setReplyTo(null);
-    socket.emit('join-room', String(activeRoom.id));
-    loadMessages();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoom]);
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+  }, []);
 
-  // ── Auth ─────────────────────────────────────────────────────────────────
-  const handleAuth = (data) => { saveSession(data); setAuth(data); };
   const handleLogout = () => {
-    clearSession(); setAuth(null); setRooms([]); setActiveRoom(null);
-    setActiveDM(null); setMessages([]); setOnlineUsers([]); setTypingUsers([]);
+    logout();
+    setRooms([]);
+    setActiveRoom(null);
+    setActiveDM(null);
+    setOnlineUsers([]);
     socket.disconnect();
   };
+
   const handleSettingsSaved = (data) => {
-    saveSession(data); setAuth(data);
-    socket.emit('join', { token: data.token, username: data.username });
+    updateAuth(data);
+    socket.auth = { token: data.token };
+    if (socket.connected) {
+      socket.disconnect();
+      socket.connect();
+    }
   };
 
-  // ── Room handlers ─────────────────────────────────────────────────────────
   const handleRoomSelect = (room) => {
     if (activeRoom?.id === room.id && !activeDM) return;
     setActiveDM(null);
     setActiveRoom(room);
+    setRoomUnread(prev => ({ ...prev, [String(room.id)]: 0 }));
     setSidebarOpen(false);
   };
   const handleRoomCreated = (room) => { setRooms(prev => [...prev, room]); handleRoomSelect(room); };
@@ -161,13 +123,10 @@ export default function App() {
   const handleDeleteRoom = async (room) => {
     if (!confirm(`Delete room "#${room.name}" and all its messages? This cannot be undone.`)) return;
     try {
-      await axios.delete(`${BACKEND_URL}/api/rooms/${room.id}`, {
-        headers: { Authorization: `Bearer ${auth.token}` },
-      });
+      await api.delete(`/api/rooms/${room.id}`);
       setRooms(prev => prev.filter(r => r.id !== room.id));
-      // If we were viewing the deleted room, switch to the first available
       if (activeRoom?.id === room.id) {
-        setActiveRoom(prev => {
+        setActiveRoom(() => {
           const remaining = rooms.filter(r => r.id !== room.id);
           return remaining.length > 0 ? remaining[0] : null;
         });
@@ -177,59 +136,32 @@ export default function App() {
     }
   };
 
-  // ── DM handlers ───────────────────────────────────────────────────────────
   const handleDMSelect = (conv) => {
     setActiveDM(conv);
-    window.__activeDMId = conv.id;
     setSidebarOpen(false);
   };
-
-  // ── Room message handlers ─────────────────────────────────────────────────
-  const handleSend = (text) => {
-    socket.emit('send_message', {
-      room_id:      String(activeRoom.id),
-      content:      text,
-      message_type: 'text',
-      reply_to_id:  replyTo?.id || null,
-    });
-    setReplyTo(null);
-  };
-  const handleDeleteMessage = (id) =>
-    socket.emit('delete_message', { messageId: id, room_id: String(activeRoom.id) });
-  const handleEditMessage = (id, content) =>
-    socket.emit('edit_message', { messageId: id, content, room_id: String(activeRoom.id) });
-  const handleReplyMessage = (msg) => setReplyTo(msg);
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     setUploading(true);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('upload_preset', import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET);
-      const res  = await fetch(
-        `https://api.cloudinary.com/v1_1/${import.meta.env.VITE_CLOUDINARY_CLOUD_NAME}/auto/upload`,
-        { method: 'POST', body: fd }
-      );
-      const data = await res.json();
-      socket.emit('send_message', {
-        room_id:      String(activeRoom.id),
-        content:      data.secure_url,
-        message_type: file.type.startsWith('image/') ? 'image' : 'document',
-      });
-    } catch (err) { console.error('Upload failed:', err); }
-    finally { setUploading(false); e.target.value = ''; }
+      await sendFile(file);
+    } catch (err) {
+      console.error('Upload failed:', err);
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
-  if (!auth) return <JoinScreen onAuth={handleAuth} />;
+  if (!auth) return <JoinScreen onAuth={login} />;
 
   return (
     <div className="chat-app">
+      {!isOnline && <div className="network-status" role="status">You are offline. New messages will send once you reconnect.</div>}
       {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
 
-      {/* Sidebar */}
       <div className={`sidebar-wrapper ${sidebarOpen ? 'sidebar-wrapper--open' : ''}`}>
         <RoomSidebar
           rooms={rooms}
@@ -238,6 +170,7 @@ export default function App() {
           activeDM={activeDM}
           onDMSelect={handleDMSelect}
           onlineUsers={onlineUsers}
+          roomUnread={roomUnread}
           username={auth.username}
           userId={auth.userId}
           token={auth.token}
@@ -250,17 +183,14 @@ export default function App() {
         />
       </div>
 
-      {/* Main area — DM or Room */}
       {activeDM ? (
         <DMView
           conv={activeDM}
           auth={auth}
-          onClose={() => { setActiveDM(null); window.__activeDMId = null; }}
-          onUnreadCleared={(convId) => { window.__activeDMId = convId; }}
+          onClose={() => setActiveDM(null)}
         />
       ) : (
         <div className="chat-view-container">
-          {/* Header */}
           <div className="chat-view-header">
             <button className="hamburger-btn" onClick={() => setSidebarOpen(v => !v)} aria-label="Open sidebar">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -284,17 +214,17 @@ export default function App() {
                 messages={messages}
                 username={auth.username}
                 isAdmin={auth.isAdmin}
-                loading={loadingMsgs}
+                loading={loading}
                 hasMore={hasMore}
                 onLoadMore={(id) => loadMessages(id)}
-                onDeleteMessage={handleDeleteMessage}
-                onEditMessage={handleEditMessage}
-                onReplyMessage={handleReplyMessage}
+                onDeleteMessage={deleteMessage}
+                onEditMessage={editMessage}
+                onReplyMessage={setReplyTo}
                 typingUsers={typingUsers}
                 myUserId={auth.userId}
               />
               <MessageInput
-                onSend={handleSend}
+                onSend={sendMessage}
                 onFileUpload={handleFileUpload}
                 uploading={uploading}
                 roomId={String(activeRoom.id)}
@@ -310,7 +240,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Modals */}
       {showAdmin && auth.isAdmin && (
         <AdminPanel token={auth.token} onClose={() => setShowAdmin(false)} />
       )}

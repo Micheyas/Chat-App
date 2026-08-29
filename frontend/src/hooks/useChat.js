@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSocket } from './useSocket';
 import api from '../services/api';
 
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
 /**
  * useChat — manages room message state for a given room.
  * Returns messages, loading state, and handlers.
@@ -14,7 +16,6 @@ export function useChat(auth, activeRoom) {
   const [typingUsers, setTypingUsers] = useState([]);
   const [replyTo,     setReplyTo]     = useState(null);
 
-  // Load messages from REST API
   const loadMessages = useCallback(async (beforeId = null) => {
     if (!auth || !activeRoom || loading) return;
     setLoading(true);
@@ -31,7 +32,6 @@ export function useChat(auth, activeRoom) {
     }
   }, [auth, activeRoom, loading]);
 
-  // Reset + load when room changes
   useEffect(() => {
     if (!activeRoom) return;
     setMessages([]);
@@ -42,12 +42,14 @@ export function useChat(auth, activeRoom) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoom?.id]);
 
-  // Socket event handlers
   useEffect(() => {
     const onReceive = (msg) => setMessages(prev => [...prev, msg]);
     const onDeleted = (id)  => setMessages(prev => prev.filter(m => m.id !== id));
     const onEdited  = (msg) => setMessages(prev =>
       prev.map(m => m.id === msg.id ? { ...m, content: msg.content, edited: true } : m)
+    );
+    const onReacted = ({ messageId, reactions }) => setMessages(prev =>
+      prev.map(m => m.id === messageId ? { ...m, reactions } : m)
     );
     const onTyping = ({ username: u, isTyping }) =>
       setTypingUsers(prev =>
@@ -57,12 +59,14 @@ export function useChat(auth, activeRoom) {
     socket.on('receive_message', onReceive);
     socket.on('message_deleted', onDeleted);
     socket.on('message_edited',  onEdited);
+    socket.on('message_reactions_updated', onReacted);
     socket.on('user-typing',     onTyping);
 
     return () => {
       socket.off('receive_message', onReceive);
       socket.off('message_deleted', onDeleted);
       socket.off('message_edited',  onEdited);
+      socket.off('message_reactions_updated', onReacted);
       socket.off('user-typing',     onTyping);
     };
   }, [socket]);
@@ -88,9 +92,37 @@ export function useChat(auth, activeRoom) {
     socket.emit('edit_message', { messageId: id, content, room_id: String(activeRoom.id) });
   };
 
+  const sendFile = async (file) => {
+    if (!activeRoom || !file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      throw new Error('File too large (max 10MB)');
+    }
+    const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+    const preset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+    if (!cloudName || !preset) {
+      throw new Error('File uploads are not configured');
+    }
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('upload_preset', preset);
+    const res = await fetch(
+      `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,
+      { method: 'POST', body: fd }
+    );
+    const data = await res.json();
+    if (!data.secure_url) {
+      throw new Error(data.error?.message || 'Upload failed');
+    }
+    socket.emit('send_message', {
+      room_id: String(activeRoom.id),
+      content: data.secure_url,
+      message_type: file.type.startsWith('image/') ? 'image' : 'document',
+    });
+  };
+
   return {
     messages, hasMore, loading, typingUsers,
     replyTo, setReplyTo,
-    loadMessages, sendMessage, deleteMessage, editMessage,
+    loadMessages, sendMessage, deleteMessage, editMessage, sendFile,
   };
 }
