@@ -233,6 +233,35 @@ body {
   cursor: not-allowed;
 }
 
+.lamp-btn--ghost {
+  background: transparent;
+  border: 1px solid #ffb703;
+  color: #ffb703;
+  margin-top: 10px;
+}
+
+.lamp-btn--ghost:hover:not(:disabled) {
+  background: rgba(255, 183, 3, 0.12);
+  transform: translateY(-1px);
+}
+
+.lamp-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 2px;
+  color: #777;
+  font-size: 12px;
+}
+
+.lamp-divider::before,
+.lamp-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #333;
+}
+
 /* Hint text below cord */
 .lamp-wrap::after {
   content: 'Pull to turn on';

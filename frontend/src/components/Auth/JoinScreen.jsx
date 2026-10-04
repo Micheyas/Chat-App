@@ -64,6 +64,19 @@ export default function JoinScreen({ onAuth }) {
     }
   };
 
+  const handleDemo = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const { data } = await axios.post(`${BACKEND_URL}/api/demo`);
+      onAuth(data);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Something went wrong. Try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Pending approval screen
   if (mode === 'pending') {
     return (
@@ -160,6 +173,11 @@ export default function JoinScreen({ onAuth }) {
             {loading ? 'Please wait…' : mode === 'register' ? 'Create Account' : 'Sign In'}
           </button>
         </form>
+
+        <div className="lamp-divider"><span>or</span></div>
+        <button type="button" className="lamp-btn lamp-btn--ghost" onClick={handleDemo} disabled={loading}>
+          Try the live demo — no account needed
+        </button>
       </div>
     </div>
   );
