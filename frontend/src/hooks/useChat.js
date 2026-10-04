@@ -15,6 +15,8 @@ export function useChat(auth, activeRoom) {
   const [loading,     setLoading]     = useState(false);
   const [typingUsers, setTypingUsers] = useState([]);
   const [replyTo,     setReplyTo]     = useState(null);
+  // readReceipts: { [userId]: { username, lastReadId } } — who has seen which message
+  const [readReceipts, setReadReceipts] = useState({});
 
   const loadMessages = useCallback(async (beforeId = null) => {
     if (!auth || !activeRoom || loading) return;
@@ -25,11 +27,19 @@ export function useChat(auth, activeRoom) {
       const { data } = await api.get('/api/messages', { params });
       if (data.length < 30) setHasMore(false); else setHasMore(true);
       setMessages(prev => beforeId ? [...data, ...prev] : data);
+      // Mark the newest loaded message as read
+      if (!beforeId && data.length > 0) {
+        socket.emit('mark_room_read', {
+          roomId: String(activeRoom.id),
+          lastMessageId: data[data.length - 1].id,
+        });
+      }
     } catch (err) {
       console.error('Failed to load messages:', err);
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth, activeRoom, loading]);
 
   useEffect(() => {
@@ -37,13 +47,33 @@ export function useChat(auth, activeRoom) {
     setMessages([]);
     setHasMore(true);
     setReplyTo(null);
+    setReadReceipts({});
     socket.emit('join-room', String(activeRoom.id));
     loadMessages();
+    // Load who has read up to which message
+    api.get(`/api/rooms/${activeRoom.id}/read-receipts`)
+      .then(({ data }) => {
+        const map = {};
+        (data || []).forEach((r) => {
+          map[r.userId] = { username: r.username, lastReadId: Number(r.lastReadId) || 0 };
+        });
+        setReadReceipts(map);
+      })
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoom?.id]);
 
   useEffect(() => {
-    const onReceive = (msg) => setMessages(prev => [...prev, msg]);
+    const onReceive = (msg) => {
+      setMessages(prev => [...prev, msg]);
+      // The room is open, so this message is read immediately
+      if (activeRoom && msg.id) {
+        socket.emit('mark_room_read', {
+          roomId: String(activeRoom.id),
+          lastMessageId: msg.id,
+        });
+      }
+    };
     const onDeleted = (id)  => setMessages(prev => prev.filter(m => m.id !== id));
     const onEdited  = (msg) => setMessages(prev =>
       prev.map(m => m.id === msg.id ? { ...m, content: msg.content, edited: true } : m)
@@ -55,12 +85,18 @@ export function useChat(auth, activeRoom) {
       setTypingUsers(prev =>
         isTyping ? (prev.includes(u) ? prev : [...prev, u]) : prev.filter(x => x !== u)
       );
+    const onReadUpdate = ({ userId, username, lastReadId }) =>
+      setReadReceipts(prev => ({
+        ...prev,
+        [userId]: { username, lastReadId: Number(lastReadId) || 0 },
+      }));
 
     socket.on('receive_message', onReceive);
     socket.on('message_deleted', onDeleted);
     socket.on('message_edited',  onEdited);
     socket.on('message_reactions_updated', onReacted);
     socket.on('user-typing',     onTyping);
+    socket.on('room_read_update', onReadUpdate);
 
     return () => {
       socket.off('receive_message', onReceive);
@@ -68,8 +104,10 @@ export function useChat(auth, activeRoom) {
       socket.off('message_edited',  onEdited);
       socket.off('message_reactions_updated', onReacted);
       socket.off('user-typing',     onTyping);
+      socket.off('room_read_update', onReadUpdate);
     };
-  }, [socket]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, activeRoom?.id]);
 
   const sendMessage = (text) => {
     if (!activeRoom) return;
@@ -121,7 +159,7 @@ export function useChat(auth, activeRoom) {
   };
 
   return {
-    messages, hasMore, loading, typingUsers,
+    messages, hasMore, loading, typingUsers, readReceipts,
     replyTo, setReplyTo,
     loadMessages, sendMessage, deleteMessage, editMessage, sendFile,
   };

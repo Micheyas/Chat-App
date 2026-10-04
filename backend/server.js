@@ -700,6 +700,28 @@ app.get('/api/rooms', authMiddleware, async (_req, res) => {
   }
 });
 
+// GET /api/rooms/:id/read-receipts — who has read up to which message in a room
+app.get('/api/rooms/:id/read-receipts', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT r.user_id, u.username, r.last_read_id, r.read_at
+       FROM room_read_receipts r
+       JOIN users u ON u.id = r.user_id
+       WHERE r.room_id = $1`,
+      [String(req.params.id)]
+    );
+    res.json(rows.map((r) => ({
+      userId: r.user_id,
+      username: r.username,
+      lastReadId: Number(r.last_read_id) || 0,
+      readAt: r.read_at,
+    })));
+  } catch (err) {
+    console.error('Failed to fetch read receipts:', err);
+    res.status(500).json({ error: 'Failed to fetch read receipts' });
+  }
+});
+
 // POST /api/rooms — create a new room
 app.post('/api/rooms', authMiddleware, async (req, res) => {
   const { name } = req.body;
@@ -1231,6 +1253,13 @@ io.on('connection', (socket) => {
                        read_at = NOW()`,
         [roomId, user.userId, lastMessageId]
       );
+      // Tell everyone in the room so "seen" ticks update live
+      io.to(String(roomId)).emit('room_read_update', {
+        roomId: String(roomId),
+        userId: user.userId,
+        username: user.username,
+        lastReadId: Number(lastMessageId),
+      });
     } catch (err) { console.error('Failed to mark room read:', err); }
   });
 

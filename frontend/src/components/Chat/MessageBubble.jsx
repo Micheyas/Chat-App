@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 
-export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, onReply, otherLastReadId, myUserId }) {
+export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, onReply, otherLastReadId, myUserId, readReceipts }) {
   const [editing,  setEditing]  = useState(false);
   const [editText, setEditText] = useState(msg.content);
   const inputRef = useRef(null);
@@ -32,6 +32,13 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, o
   // Tick state — computed before render, no IIFE
   const isDM   = otherLastReadId !== undefined;
   const isRead = isDM && msg.id && msg.id <= otherLastReadId;
+
+  // Room "seen by" — which other members have read up to this message
+  const seenBy = (!isDM && isOwn && !msg.deleted && msg.id && readReceipts)
+    ? Object.entries(readReceipts).filter(
+        ([uid, r]) => String(uid) !== String(myUserId) && Number(r.lastReadId) >= Number(msg.id)
+      )
+    : [];
 
   // Admin sees soft-deleted with badge; regular users never receive them
   if (msg.deleted && !isAdmin) return null;
@@ -99,11 +106,23 @@ export default function MessageBubble({ msg, isOwn, isAdmin, onDelete, onEdit, o
                 </svg>
               </span>
             )}
-            {isOwn && !msg.deleted && (!isDM || !isRead) && (
+            {isOwn && !msg.deleted && ((isDM && !isRead) || (!isDM && seenBy.length === 0)) && (
               <span className="message-status message-status--sent" title="Sent">
                 <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
                   <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
                 </svg>
+              </span>
+            )}
+            {/* Room "seen by" — blue ticks + count when others have read this */}
+            {isOwn && !msg.deleted && !isDM && seenBy.length > 0 && (
+              <span
+                className="message-status message-status--read"
+                title={`Seen by ${seenBy.map(([, r]) => r.username).join(', ')}`}
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+                  <path d="M18 7l-1.41-1.41-6.34 6.34 1.41 1.41L18 7zm4.24-1.41L11.66 16.17 7.48 12l-1.41 1.41L11.66 19l12-12-1.42-1.41zM.41 13.41L6 19l1.41-1.41L1.83 12 .41 13.41z"/>
+                </svg>
+                <span className="seen-count">{seenBy.length}</span>
               </span>
             )}
 

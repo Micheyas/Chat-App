@@ -28,7 +28,7 @@ export default function App() {
   const [isOnline,     setIsOnline]     = useState(navigator.onLine);
 
   const {
-    messages, hasMore, loading, typingUsers,
+    messages, hasMore, loading, typingUsers, readReceipts,
     replyTo, setReplyTo,
     loadMessages, sendMessage, deleteMessage, editMessage, sendFile,
   } = useChat(auth, activeRoom);
@@ -222,6 +222,7 @@ export default function App() {
                 onReplyMessage={setReplyTo}
                 typingUsers={typingUsers}
                 myUserId={auth.userId}
+                readReceipts={readReceipts}
               />
               <MessageInput
                 onSend={sendMessage}

@@ -2094,6 +2094,22 @@ body {
   color: #0088cc; /* blue double tick = read by recipient */
 }
 
+/* Number of room members who have seen the message */
+.message-status:has(.seen-count) {
+  width: auto;
+}
+.message-status:has(.seen-count) svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.seen-count {
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 2px;
+  line-height: 1;
+}
+
 /* ─── Unread badge on DM list items ──────────────────────────────────────── */
 .unread-badge {
   background: #0088cc;
