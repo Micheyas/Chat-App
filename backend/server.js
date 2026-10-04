@@ -208,46 +208,6 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// POST /api/demo — one-click demo account, auto-approved, no password needed.
-// Usernames are random (guest_xxxxxx) so demo visitors never collide.
-app.post('/api/demo', async (req, res) => {
-  if (!allowAuthAttempt(req.ip)) {
-    return res.status(429).json({ error: 'Too many attempts. Try again later.' });
-  }
-  try {
-    const suffix = Math.random().toString(36).slice(2, 8);
-    const username = `guest_${suffix}`;
-    const passwordHash = await bcrypt.hash(require('crypto').randomUUID(), 12);
-    const result = await pool.query(
-      `INSERT INTO users (username, email, password_hash, approved)
-       VALUES ($1, $2, $3, TRUE) RETURNING id, username`,
-      [username, `${username}@demo.local`, passwordHash]
-    );
-    const user = result.rows[0];
-    const token = jwt.sign(
-      { userId: user.id, username: user.username, isAdmin: false },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-    res.status(201).json({ token, username: user.username, userId: user.id, isAdmin: false, demo: true });
-  } catch (err) {
-    console.error('Demo error:', err);
-    res.status(500).json({ error: 'Demo login failed' });
-  }
-});
-
-// Clean up demo accounts older than 7 days so the users table doesn't fill up.
-const demoCleanup = setInterval(async () => {
-  try {
-    await pool.query(
-      `DELETE FROM users WHERE username LIKE 'guest!_%' ESCAPE '!' AND created_at < NOW() - INTERVAL '7 days'`
-    );
-  } catch (err) {
-    console.error('Demo cleanup error:', err.message);
-  }
-}, 24 * 60 * 60 * 1000);
-demoCleanup.unref();
-
 // ─── ADMIN ROUTES ─────────────────────────────────────────────────────────────
 
 // GET /api/admin/pending-users — list all users waiting for approval
